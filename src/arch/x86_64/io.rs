@@ -21,7 +21,7 @@ pub unsafe fn outw(port: u16, val: u16) {
 }
 
 #[inline(always)]
-pub unsafe fn inw(port: u16) -> {
+pub unsafe fn inw(port: u16) -> u16 {
     let val: u16;
     asm!("in %dx, %ax", in("dx") port, out("ax") val,
         options(nomem, nostack, preserves_flags, att_syntax));
@@ -51,17 +51,17 @@ pub unsafe fn io_wait() {
 
 // ─── MSR (Model Specific Registers) ──────────────────────────────────────────
 
-pub const MSR_EFER:        u32 = 0xC000_0080;
-pub const MSR_STAR:        u32 = 0xC000_0081;
-pub const MSR_LSTAR:       u32 = 0xC000_0082; // SYSCALL target RIP
-pub const MSR_CSTAR:       u32 = 0xC000_0083; // SYSCALL compat target
-pub const MSR_SFMASK:      u32 = 0xC000_0084; // SYSCALL RFLAGS mask
-pub const MSR_FS_BASE:     u32 = 0xC000_0100;
-pub const MSR_GS_BASE:     u32 = 0xC000_0101; // текущий GS
-pub const MSR_KERNEL_GS:   u32 = 0xC000_0102; // альтернативный GS (swapgs)
-pub const MSR_TSC_AUX:     u32 = 0xC000_0103;
-pub const MSR_APIC_BASE:   u32 = 0x0000_001B;
-pub const MSR_IA32_TSC:    u32 = 0x0000_0010;
+pub const MSR_EFER: u32 = 0xC000_0080;
+pub const MSR_STAR: u32 = 0xC000_0081;
+pub const MSR_LSTAR: u32 = 0xC000_0082; // SYSCALL target RIP
+pub const MSR_CSTAR: u32 = 0xC000_0083; // SYSCALL compat target
+pub const MSR_SFMASK: u32 = 0xC000_0084; // SYSCALL RFLAGS mask
+pub const MSR_FS_BASE: u32 = 0xC000_0100;
+pub const MSR_GS_BASE: u32 = 0xC000_0101; // текущий GS
+pub const MSR_KERNEL_GS: u32 = 0xC000_0102; // альтернативный GS (swapgs)
+pub const MSR_TSC_AUX: u32 = 0xC000_0103;
+pub const MSR_APIC_BASE: u32 = 0x0000_001B;
+pub const MSR_IA32_TSC: u32 = 0x0000_0010;
 
 #[inline(always)]
 pub unsafe fn rdmsr(msr: u32) -> u64 {
@@ -135,12 +135,11 @@ pub unsafe fn write_cr4(v: u64) {
     asm!("mov {}, %cr4", in(reg) v, options(att_syntax, nomem, nostack));
 }
 
-
-pub const RFLAGS_IF:    u64 = 1 << 9;
-pub const RFLAGS_DF:    u64 = 1 << 10;
-pub const RFLAGS_IOPL:  u64 = 3 << 12;
-pub const RFLAGS_AC:    u64 = 1 << 18;
-pub const RFLAGS_ID:    u64 = 1 << 21;
+pub const RFLAGS_IF: u64 = 1 << 9;
+pub const RFLAGS_DF: u64 = 1 << 10;
+pub const RFLAGS_IOPL: u64 = 3 << 12;
+pub const RFLAGS_AC: u64 = 1 << 18;
+pub const RFLAGS_ID: u64 = 1 << 21;
 
 #[inline(always)]
 pub fn read_rflags() -> u64 {
@@ -149,12 +148,10 @@ pub fn read_rflags() -> u64 {
     v
 }
 
-
 #[inline(always)]
 pub fn sti() {
     unsafe { asm!("sti", options(nomem, nostack)) };
 }
-
 
 #[inline(always)]
 pub fn cli() -> u64 {
@@ -163,18 +160,15 @@ pub fn cli() -> u64 {
     flags
 }
 
-
 #[inline(always)]
 pub fn hlt() {
     unsafe { asm!("hlt", options(nomem, nostack)) };
 }
 
-
 #[inline(always)]
 pub unsafe fn invlpg(addr: u64) {
     asm!("invlpg [{0}]", in(reg) addr, options(nostack, preserves_flags));
 }
-
 
 #[inline(always)]
 pub unsafe fn flush_tlb_all() {
@@ -194,7 +188,10 @@ pub struct CpuidResult {
 
 #[inline]
 pub fn cpuid(leaf: u32, subleaf: u32) -> CpuidResult {
-    let eax: u32; let ebx: u32; let ecx: u32; let edx: u32;
+    let eax: u32;
+    let ebx: u32;
+    let ecx: u32;
+    let edx: u32;
     unsafe {
         asm!(
             "cpuid",
@@ -208,7 +205,6 @@ pub fn cpuid(leaf: u32, subleaf: u32) -> CpuidResult {
     CpuidResult { eax, ebx, ecx, edx }
 }
 
-
 pub fn has_feature_ecx(leaf: u32, bit: u32) -> bool {
     cpuid(leaf, 0).ecx & (1 << bit) != 0
 }
@@ -217,21 +213,18 @@ pub fn has_feature_edx(leaf: u32, bit: u32) -> bool {
     cpuid(leaf, 0).edx & (1 << bit) != 0
 }
 
-
-pub const CR4_PAE:  u64 = 1 << 5;
-pub const CR4_PGE:  u64 = 1 << 7;
+pub const CR4_PAE: u64 = 1 << 5;
+pub const CR4_PGE: u64 = 1 << 7;
 pub const CR4_OSFXSR: u64 = 1 << 9;
 pub const CR4_SMEP: u64 = 1 << 20;
 pub const CR4_SMAP: u64 = 1 << 21;
 pub const CR4_FSGSBASE: u64 = 1 << 16;
 
-
 pub const CR0_WP: u64 = 1 << 16;
 pub const CR0_PE: u64 = 1 << 0;
 pub const CR0_PG: u64 = 1 << 31;
 
-
-pub const EFER_SCE:  u64 = 1 << 0;
-pub const EFER_LME:  u64 = 1 << 8;
-pub const EFER_LMA:  u64 = 1 << 10;
-pub const EFER_NXE:  u64 = 1 << 11;
+pub const EFER_SCE: u64 = 1 << 0;
+pub const EFER_LME: u64 = 1 << 8;
+pub const EFER_LMA: u64 = 1 << 10;
+pub const EFER_NXE: u64 = 1 << 11;

@@ -1,23 +1,23 @@
+use crate::arch::x86_64::limine::phys_to_virt;
+use crate::mm::pmm::{align_up, alloc_zeroed_frame, free_frame, PAGE_SIZE};
+use crate::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
-use crate::mm::pmm::{alloc_zeroed_frame, free_frame, PAGE_SIZE, align_up};
-use crate::arch::x86_64::limine::phys_to_virt;
-use crate::sync::spinlock::SpinLock;
 
 const SLAB_SIZES: [usize; 9] = [8, 16, 32, 64, 128, 256, 512, 1024, 2048];
-const NUM_SLABS:  usize = SLAB_SIZES.len();
+const NUM_SLABS: usize = SLAB_SIZES.len();
 
 struct FreeObj {
     next: *mut FreeObj,
 }
 
 struct Slab {
-    base:     *mut u8,
+    base: *mut u8,
     obj_size: usize,
-    free:     *mut FreeObj,
-    used:     usize,
+    free: *mut FreeObj,
+    used: usize,
     capacity: usize,
-    next:     *mut Slab,
+    next: *mut Slab,
 }
 
 impl Slab {
@@ -29,12 +29,12 @@ impl Slab {
         let header_size = align_up(core::mem::size_of::<Slab>() as u64, obj_size as u64) as usize;
         let capacity = (PAGE_SIZE - header_size) / obj_size;
 
-        (*slab).base     = base;
+        (*slab).base = base;
         (*slab).obj_size = obj_size;
-        (*slab).free     = core::ptr::null_mut();
-        (*slab).used     = 0;
+        (*slab).free = core::ptr::null_mut();
+        (*slab).used = 0;
         (*slab).capacity = capacity;
-        (*slab).next     = core::ptr::null_mut();
+        (*slab).next = core::ptr::null_mut();
 
         let objs_start = base.add(header_size);
         let mut prev: *mut FreeObj = core::ptr::null_mut();
@@ -49,7 +49,9 @@ impl Slab {
     }
 
     unsafe fn alloc(&mut self) -> Option<*mut u8> {
-        if self.free.is_null() { return None; }
+        if self.free.is_null() {
+            return None;
+        }
         let obj = self.free;
         self.free = (*obj).next;
         self.used += 1;
@@ -73,9 +75,9 @@ impl Slab {
 }
 
 struct SlabCache {
-    obj_size:  usize,
-    partial:   *mut Slab,
-    full:      *mut Slab,
+    obj_size: usize,
+    partial: *mut Slab,
+    full: *mut Slab,
 }
 
 impl SlabCache {
@@ -83,7 +85,7 @@ impl SlabCache {
         Self {
             obj_size,
             partial: core::ptr::null_mut(),
-            full:    core::ptr::null_mut(),
+            full: core::ptr::null_mut(),
         }
     }
 
@@ -121,7 +123,9 @@ impl SlabCache {
             self.partial = slab;
         } else if (*slab).is_empty() {
             self.remove_from_partial(slab);
-            free_frame(crate::arch::x86_64::limine::virt_to_phys((*slab).base as u64));
+            free_frame(crate::arch::x86_64::limine::virt_to_phys(
+                (*slab).base as u64,
+            ));
         }
     }
 
@@ -147,7 +151,6 @@ impl SlabCache {
         }
     }
 }
-
 
 struct KernelAllocator {
     caches: [SlabCache; NUM_SLABS],
@@ -187,10 +190,12 @@ pub struct KernelHeap;
 
 unsafe impl GlobalAlloc for KernelHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let size  = layout.size();
+        let size = layout.size();
         let align = layout.align();
 
-        if size == 0 { return align as *mut u8;
+        if size == 0 {
+            return align as *mut u8;
+        } // ZST
 
         let mut alloc = ALLOCATOR.lock();
 
@@ -208,9 +213,11 @@ unsafe impl GlobalAlloc for KernelHeap {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        if ptr.is_null() || layout.size() == 0 { return; }
+        if ptr.is_null() || layout.size() == 0 {
+            return;
+        }
 
-        let size  = layout.size();
+        let size = layout.size();
         let align = layout.align();
 
         if size <= 2048 && align <= 2048 {
