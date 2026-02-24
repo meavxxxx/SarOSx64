@@ -11,18 +11,16 @@
     static_mut_refs,
     function_casts_as_integer
 )]
-#![feature(
-    abi_x86_interrupt,
-    alloc_error_handler,
-    never_type
-)]
+#![feature(abi_x86_interrupt, alloc_error_handler, never_type)]
 
 extern crate alloc;
 
 mod arch;
 mod drivers;
+mod fs;
 mod mm;
 mod proc;
+mod shell;
 mod sync;
 mod syscall;
 
@@ -61,7 +59,6 @@ pub extern "C" fn kernel_main() -> ! {
 
     let kernel_stack_top = unsafe { KERNEL_STACK.0.as_ptr().add(KERNEL_STACK_SIZE) as u64 };
     arch::x86_64::init_bsp(kernel_stack_top);
-    log::info!("Architecture initialized");
 
     mm::pmm::init();
     log::info!(
@@ -75,21 +72,19 @@ pub extern "C" fn kernel_main() -> ! {
 
     drivers::vga::init();
     drivers::vga::set_color(drivers::vga::LIGHT_GREEN, drivers::vga::BLACK);
-    println!("SarOSx64 booting...");
-
-    println!("Kernel initialized");
+    println!("SarOS 0.1.0");
     drivers::vga::set_color(drivers::vga::WHITE, drivers::vga::BLACK);
+
+    fs::init_rootfs();
+    log::info!("Filesystem initialized");
 
     arch::x86_64::io::sti();
     log::info!("Interrupts enabled");
 
     arch::x86_64::timer::calibrate_tsc();
 
-    log::info!("Sar0Sx64 initialization complete");
-    println!("All systems initialized. Entering idle loop");
-
-    let demo = proc::Process::new_kernel("demo", demo_task, 10);
-    if let Some(p) = demo {
+    let sh = proc::Process::new_kernel("shell", shell_task, 5);
+    if let Some(p) = sh {
         proc::scheduler::spawn(p);
     }
 
@@ -98,23 +93,8 @@ pub extern "C" fn kernel_main() -> ! {
     }
 }
 
-fn demo_task() -> ! {
-    log::info!("[demo] Demo kernel thread started");
-
-    let mut count = 0u64;
-    loop {
-        count += 1;
-        if count % 1000 == 0 {
-            log::info!(
-                "[demo] tick ]={} uptime={}ms free_mem={}K",
-                arch::x86_64::timer::ticks(),
-                arch::x86_64::timer::uptime_ms(),
-                mm::pmm::free_pages() * mm::PAGE_SIZE / 1024,
-            );
-        }
-
-        proc::scheduler::schedule();
-    }
+fn shell_task() -> ! {
+    shell::spawn_shell();
 }
 
 #[panic_handler]
@@ -126,6 +106,10 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
     drivers::vga::set_color(drivers::vga::WHITE, drivers::vga::RED);
     println!("\n *** KERNEL PANIC *** ");
+    if let Some(loc) = info.location() {
+        println!("{}:{}", loc.file(), loc.line());
+    }
+    println!("{}", info.message());
 
     loop {
         arch::x86_64::io::hlt();
