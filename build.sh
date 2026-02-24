@@ -7,7 +7,7 @@ if [ ! -d limine ]; then
   git clone https://github.com/limine-bootloader/limine.git --branch=v8.x-binary --depth=1 limine
 fi
 
-cargo +nightly build --target x86_64-unknown-none
+cargo +nightly build --target x86_64-unknown-none | tee build.log
 
 mkdir -p iso/boot/limine
 cp target/x86_64-unknown-none/debug/SarOS iso/boot/kernel
