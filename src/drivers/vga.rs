@@ -166,7 +166,7 @@ pub fn init() {
             return;
         }
 
-        let fb = &**fbs[0];
+        let fb = &*fbs[0];
         let mut screen = SCREEN.lock();
         screen.base = fb.address;
         screen.width = fb.width as usize;

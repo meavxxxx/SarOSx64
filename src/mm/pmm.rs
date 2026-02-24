@@ -19,6 +19,8 @@ struct FreeList {
     count: usize,
 }
 
+unsafe impl Send for FreeList {}
+
 impl FreeList {
     const fn empty() -> Self {
         Self {
@@ -75,6 +77,8 @@ struct BuddyAllocator {
     base_phys: u64,
     total_frames: usize,
 }
+
+unsafe impl Send for BuddyAllocator {}
 
 impl BuddyAllocator {
     const fn new() -> Self {

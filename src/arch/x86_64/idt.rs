@@ -124,28 +124,28 @@ macro_rules! isr_stub {
                 concat!("push ", $vector),
                 "jmp {common}",
                 common = sym isr_common,
-                options(noreturn, att_syntax)
+                options(att_syntax)
             );
         }
         stub as u64
     }};
 
     ($vector:expr, err) => {{
-        unsafe extern "C" fn stun() {
+        unsafe extern "C" fn stub() {
             core::arch::asm!(
                 concat!("push ", $vector),
                 "jmp {common}",
                 common = sym isr_common,
-                options(noreturn, att_syntax)
+                options(att_syntax)
             );
         }
         stub as u64
     }};
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn isr_common() {
-    core::arch::asm!(
+    core::arch::naked_asm!(
         "push %rax",
         "push %rbx",
         "push %rcx",
@@ -188,7 +188,7 @@ unsafe extern "C" fn isr_common() {
         "iretq",
 
         dispatch = sym interrupt_dispatch,
-        options(noreturn, att_syntax)
+        options(att_syntax)
     );
 }
 
@@ -238,7 +238,7 @@ fn irq_dispatch(irq: u8, frame: &mut InterruptFrame) {
     }
 
     match irq {
-        0 => crate::arch::x86_64::timer::irq_time(frame),
+        0 => crate::arch::x86_64::timer::irq_timer(frame),
         1 => crate::drivers::keyboard::irq_keyboard(frame),
         _ => log::debug!("Unhandled IRQ {}", irq),
     }
@@ -272,7 +272,7 @@ fn exc_bound_range(frame: &InterruptFrame) {
 
 fn exc_invalid_opcode(frame: &InterruptFrame) {
     if frame.cs & 3 == 3 {
-        delive_signal(frame, Signal::SIGILL, "Invalid Opcode");
+        deliver_signal(frame, Signal::SIGILL, "Invalid Opcode");
     } else {
         panic!("#UD Invalid Opcode in kernel at RIP={:#018x}", frame.rip);
     }
@@ -394,7 +394,7 @@ pub enum Signal {
     SIGTRAP = 5,
 }
 
-fn deliver_signal(fram: &InterruptFrame, sig: Signal, reason: &str) {
+fn deliver_signal(frame: &InterruptFrame, sig: Signal, reason: &str) {
     log::warn!(
         "Signal {:?} ({}) to current process, RIP={:#018x}",
         sig,
@@ -404,20 +404,7 @@ fn deliver_signal(fram: &InterruptFrame, sig: Signal, reason: &str) {
     panic!("Unhandled user signal {:?} ({})", sig, reason);
 }
 
-macro_rules! make_stubs {
-    (err: $($v:expr),*) => {
-        ${
-            unsafe extern "C" fn paste::paste!{[<isr_stub_$v>]} () {
-                core::arch::asm!(
-                    concat!("push ", $v),
-                    "jmp {common}",
-                    common = sym isr_common,
-                    options(noreturn, att_syntax)
-                );
-            }
-        }*
-    };
-}
+// (unused broken macro removed)
 
 pub fn init() {
     unsafe {
@@ -446,11 +433,11 @@ pub fn init() {
 }
 
 fn make_isr_no_err(vector: u64) -> u64 {
-    ISR_NO_ERR_TABLE[vector as usize]
+    unsafe { ISR_NO_ERR_TABLE[vector as usize] }
 }
 
 fn make_isr_err(vector: u64) -> u64 {
-    ISR_ERR_TABLE[vector as usize]
+    unsafe { ISR_ERR_TABLE[vector as usize] }
 }
 
 static mut ISR_NO_ERR_TABLE: [u64; 256] = [0u64; 256];
@@ -465,23 +452,23 @@ pub fn init_tables() {
     }
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn isr_no_err_stub() {
-    asm!(
+    core::arch::naked_asm!(
         "push 0",
         "push 0",
         "jmp {c}",
         c = sym isr_common,
-        options(noreturn, att_syntax)
+        options(att_syntax)
     );
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn isr_err_stub() {
-    asm!(
+    core::arch::naked_asm!(
         "push 0",
         "jmp {c}",
         c = sym isr_common,
-        options(noreturn, att_syntax)
+        options(att_syntax)
     );
 }

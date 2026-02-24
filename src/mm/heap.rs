@@ -80,6 +80,8 @@ struct SlabCache {
     full: *mut Slab,
 }
 
+unsafe impl Send for SlabCache {}
+
 impl SlabCache {
     const fn new(obj_size: usize) -> Self {
         Self {
@@ -155,6 +157,8 @@ impl SlabCache {
 struct KernelAllocator {
     caches: [SlabCache; NUM_SLABS],
 }
+
+unsafe impl Send for KernelAllocator {}
 
 impl KernelAllocator {
     const fn new() -> Self {

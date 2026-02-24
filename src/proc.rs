@@ -111,7 +111,7 @@ pub struct RunQueue {
 }
 
 impl RunQueue {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             queue: Vec::new(),
             current: None,
@@ -173,10 +173,11 @@ pub fn schedule() {
     if let Some(ref p) = next {
         p.lock().state = ProcessState::Running;
     }
+    let next_for_switch = next.clone();
     rq.current = next.clone();
     drop(rq);
 
-    if let (Some(old_a), Some(new_a)) = (old, next) {
+    if let (Some(old_a), Some(new_a)) = (old, next_for_switch) {
         if Arc::ptr_eq(&old_a, &new_a) {
             return;
         }
@@ -219,9 +220,9 @@ pub fn wake_up(pid: u32) {
     }
 }
 
-#[naked]
+#[unsafe(naked)]
 pub unsafe extern "C" fn context_switch(old: *mut CpuContext, new: *const CpuContext) {
-    core::arch::asm!(
+    core::arch::naked_asm!(
         "mov %rbx,40(%rdi)",
         "mov %rbp,32(%rdi)",
         "mov %r12,24(%rdi)",
@@ -247,13 +248,13 @@ pub unsafe extern "C" fn context_switch(old: *mut CpuContext, new: *const CpuCon
         "jmp *56(%rsi)",
         "1:",
         "ret",
-        options(noreturn, att_syntax)
+        options(att_syntax)
     );
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn jump_to_context(ctx: *const CpuContext) {
-    core::arch::asm!(
+    core::arch::naked_asm!(
         "mov  0(%rdi),%r15",
         "mov  8(%rdi),%r14",
         "mov 16(%rdi),%r13",
@@ -265,7 +266,7 @@ unsafe extern "C" fn jump_to_context(ctx: *const CpuContext) {
         "push %rax",
         "popfq",
         "jmp *56(%rdi)",
-        options(noreturn, att_syntax)
+        options(att_syntax)
     );
 }
 

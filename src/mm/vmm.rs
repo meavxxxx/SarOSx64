@@ -146,8 +146,14 @@ impl AddressSpace {
         let pml4 = self.pml4_mut();
         let parent_flags = PTE_WRITABLE | PTE_USER;
 
-        let pdpt = pml4.get_or_alloc_table(pml4_idx(virt), parent_flags)?;
-        let pd = pdpt.get_or_alloc_table(pdpt_idx(virt), parent_flags)?;
+        let pdpt = match pml4.get_or_alloc_table(pml4_idx(virt), parent_flags) {
+            Some(t) => t,
+            None => return false,
+        };
+        let pd = match pdpt.get_or_alloc_table(pdpt_idx(virt), parent_flags) {
+            Some(t) => t,
+            None => return false,
+        };
 
         pd.set_entry(
             pd_idx(virt),
@@ -294,7 +300,6 @@ pub fn init() {
 pub fn handle_page_fault(addr: u64, error: u64) -> bool {
     let present = error & 1 != 0;
     let write = error & 2 != 0;
-    let user = error & 4 != 0;
 
     let proc = match crate::proc::scheduler::current_process() {
         Some(p) => p,
@@ -303,8 +308,7 @@ pub fn handle_page_fault(addr: u64, error: u64) -> bool {
 
     let mut proc = proc.lock();
 
-    let vma = proc.vm.find_vma(addr);
-    let vma = match vma {
+    let vma = match proc.vm.find_vma(addr).cloned() {
         Some(v) => v,
         None => return false,
     };
@@ -317,7 +321,7 @@ pub fn handle_page_fault(addr: u64, error: u64) -> bool {
     }
 
     if !present {
-        return handle_demand_page(&mut proc.address_space, addr, vma);
+        return handle_demand_page(&mut proc.address_space, addr, &vma);
     }
 
     false
@@ -365,6 +369,7 @@ fn handle_cow(space: &mut AddressSpace, addr: u64) -> bool {
 }
 
 bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct VmaFlags: u32 {
         const READ          = 1 << 0;
         const WRITE         = 1 << 1;
@@ -390,7 +395,7 @@ impl VmaEntry {
 }
 
 pub struct VmSpace {
-    areas: alloc::vec::Vec<VmaEntry>,
+    pub(crate) areas: alloc::vec::Vec<VmaEntry>,
     pub brk: u64,
 }
 

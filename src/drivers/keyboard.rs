@@ -5,7 +5,7 @@ use crate::sync::spinlock::SpinLock;
 const KB_DATA: u16 = 0x60;
 const KB_STATUS: u16 = 0x64;
 
-static SCANCODE_MAP: [u8; 128] = [
+static SCANCODE_MAP: &[u8] = &[
     0, 27, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=', 8, 9, b'q',
     b'w', b'e', b'r', b't', b'y', b'u', b'i', b'o', b'p', b'[', b']', b'\n', 0, b'a', b's', b'd',
     b'f', b'g', b'h', b'j', b'k', b'l', b';', b'\'', b'`', 0, b'\\', b'z', b'x', b'c', b'v', b'b',

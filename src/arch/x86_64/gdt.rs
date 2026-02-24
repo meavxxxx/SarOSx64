@@ -1,5 +1,4 @@
 use core::mem;
-use core::sync::atomic::{AtomicBool, Ordering};
 
 pub const SEG_KERNEL_CODE: u16 = 0x08;
 pub const SEG_KERNEL_DATA: u16 = 0x10;
@@ -53,7 +52,7 @@ impl SegDesc {
         let raw = limit_low
             | (base_low << 16)
             | (base_mid << 32)
-            | ((access as u64) << 52)
+            | ((access as u64) << 40)
             | (limit_high << 48)
             | ((flags as u64) << 52)
             | (base_high << 56);
@@ -122,6 +121,7 @@ impl CpuGdt {
     }
 
     pub fn set_kernel_stack(&mut self, rsp: u64) {
+        self.tss.rsp[0] = rsp;
         self.gdt.tss = TssDesc::new(&self.tss);
 
         let gdtr = Gdtr {
@@ -131,29 +131,22 @@ impl CpuGdt {
 
         unsafe {
             core::arch::asm!(
-                "lgdt [{gdtr}]",
+                "lgdt ({gdtr})",
 
-                "push {kcode}",
-                "lea {tmp}, [rip +2f]",
-                "push {tmp}",
-                "retfq",
-                "2:",
-
-                "mov {kdata:x}, %ds",
-                "mov {kdata:x}, %es",
-                "mov {kdata:x}, %ss",
+                "movw {kdata:x}, %ax",
+                "movw %ax, %ds",
+                "movw %ax, %es",
+                "movw %ax, %ss",
 
                 "xor %eax, %eax",
-                "mov %ax, %fs",
-                "mov %ax, %gs",
+                "movw %ax, %fs",
+                "movw %ax, %gs",
 
                 "ltr {tss:x}",
 
                 gdtr = in(reg) &gdtr,
-                kcode = in(reg) SEG_KERNEL_CODE as u64,
-                kdata = in(reg) SEG_KERNEL_DATA as u64,
+                kdata = in(reg) SEG_KERNEL_DATA,
                 tss = in(reg) SEG_TSS,
-                tmp = lateout(reg) _,
                 options(att_syntax)
             );
         }
@@ -167,7 +160,6 @@ static mut CPU_GDTS: [CpuGdt; 1] = [CpuGdt::new()];
 pub fn init_bsp(kernel_stack_top: u64) {
     unsafe {
         CPU_GDTS[0].set_kernel_stack(kernel_stack_top);
-        CPU_GDTS[0].load();
     }
 }
 

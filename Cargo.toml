@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 log = { version = "0.4", default-features = false }
+bitflags = "2"
 
 [profile.dev]
 panic    = "abort"

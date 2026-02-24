@@ -1,0 +1,17 @@
+[build]
+target = "x86_64-unknown-none"
+
+[target.x86_64-unknown-none]
+rustflags = [
+  "-C", "link-arg=-Tkernel.ld",
+  "-C", "link-arg=-nostdlib",
+  "-C", "link-arg=-z",
+  "-C", "link-arg=max-page-size=0x1000",
+  "-C", "link-arg=-z",
+  "-C", "link-arg=common-page-size=0x1000",
+  "-C", "relocation-model=static",
+]
+
+[unstable]
+build-std = ["core", "alloc", "compiler_builtins"]
+build-std-features = ["compiler-builtins-mem"]

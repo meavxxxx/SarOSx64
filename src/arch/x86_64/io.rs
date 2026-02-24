@@ -16,7 +16,7 @@ pub unsafe fn inb(port: u16) -> u8 {
 
 #[inline(always)]
 pub unsafe fn outw(port: u16, val: u16) {
-    asm!("out %ax, %dx" in("dx") port, in("ax") val,
+    asm!("out %ax, %dx", in("dx") port, in("ax") val,
         options(nomem, nostack, preserves_flags, att_syntax));
 }
 
@@ -31,8 +31,7 @@ pub unsafe fn inw(port: u16) -> u16 {
 #[inline(always)]
 pub unsafe fn outl(port: u16, val: u32) {
     asm!("out %eax, %dx", in("dx") port, in("eax") val,
-        options(nomem, nostack, preserve_flags, att_synvax));
-    val
+        options(nomem, nostack, preserves_flags, att_syntax));
 }
 
 #[inline(always)]
@@ -188,21 +187,13 @@ pub struct CpuidResult {
 
 #[inline]
 pub fn cpuid(leaf: u32, subleaf: u32) -> CpuidResult {
-    let eax: u32;
-    let ebx: u32;
-    let ecx: u32;
-    let edx: u32;
-    unsafe {
-        asm!(
-            "cpuid",
-            inout("eax") leaf => eax,
-            inout("ecx") subleaf => ecx,
-            out("ebx") ebx,
-            out("edx") edx,
-            options(nomem, nostack, preserves_flags)
-        );
+    let r = unsafe { core::arch::x86_64::__cpuid_count(leaf, subleaf) };
+    CpuidResult {
+        eax: r.eax,
+        ebx: r.ebx,
+        ecx: r.ecx,
+        edx: r.edx,
     }
-    CpuidResult { eax, ebx, ecx, edx }
 }
 
 pub fn has_feature_ecx(leaf: u32, bit: u32) -> bool {

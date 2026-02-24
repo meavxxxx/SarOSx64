@@ -1,10 +1,20 @@
 #![no_std]
 #![no_main]
+#![allow(
+    dead_code,
+    unused_imports,
+    unused_variables,
+    unused_mut,
+    unused_assignments,
+    unused_macros,
+    unused_unsafe,
+    static_mut_refs,
+    function_casts_as_integer
+)]
 #![feature(
     abi_x86_interrupt,
-    naked_functions,
     alloc_error_handler,
-    const_mut_refs
+    never_type
 )]
 
 extern crate alloc;

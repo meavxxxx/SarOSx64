@@ -108,9 +108,9 @@ pub fn exec(
     }
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn jump_to_user(entry: u64, user_rsp: u64, user_cs: u64, user_ss: u64) -> ! {
-    core::arch::asm!(
+    core::arch::naked_asm!(
         "push %rcx",
         "push %rsi",
         "pushfq",
@@ -136,7 +136,7 @@ unsafe extern "C" fn jump_to_user(entry: u64, user_rsp: u64, user_cs: u64, user_
         "xor %r14, %r14",
         "xor %r15, %r15",
         "iretq",
-        options(noreturn, att_syntax)
+        options(att_syntax)
     );
 }
 

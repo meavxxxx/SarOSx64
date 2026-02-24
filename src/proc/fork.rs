@@ -244,6 +244,8 @@ pub fn sys_fork(parent_frame: &crate::arch::x86_64::idt::InterruptFrame) -> i64 
         base_slice,
         exit_code: 0,
         name,
+        pending_signals: 0,
+        signal_mask: 0,
     };
 
     let child_arc = Arc::new(SpinLock::new(child));
@@ -259,9 +261,9 @@ pub fn sys_fork(parent_frame: &crate::arch::x86_64::idt::InterruptFrame) -> i64 
     child_pid as i64
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn fork_child_return() {
-    core::arch::asm!(
+    core::arch::naked_asm!(
         "xor %rax, %rax",
         "pop %r15",
         "pop %r14",
@@ -275,7 +277,7 @@ unsafe extern "C" fn fork_child_return() {
         "cli",
         "swapgs",
         "sysretq",
-        options(noreturn, att_syntax)
+        options(att_syntax)
     );
 }
 
