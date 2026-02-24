@@ -208,7 +208,7 @@ pub fn init() {
 
         log::info!(
             "PMM: {:.1} MiB usable ({} pages)",
-            usable_bytes as f64 / 1024.0 / 1024.0,
+            usable_bytes / 1024 / 1024,
             FREE_PAGES.load(Ordering::Relaxed)
         );
     }
