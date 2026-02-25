@@ -94,7 +94,7 @@ impl Shell {
             },
             "halt" | "poweroff" => {
                 unsafe {
-                    crate::arch::x86_64::io::outb(0x604, 0x2000);
+                    crate::arch::x86_64::io::outw(0x604, 0x2000);
                 }
                 loop {
                     crate::arch::x86_64::io::hlt();
