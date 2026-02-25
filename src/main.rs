@@ -76,6 +76,7 @@ pub extern "C" fn kernel_main() -> ! {
     drivers::vga::set_color(drivers::vga::WHITE, drivers::vga::BLACK);
 
     drivers::pci::init();
+    drivers::ide::init();
 
     fs::init_rootfs();
     log::info!("Filesystem initialized");

@@ -20,6 +20,7 @@ pub fn cmd_help() {
     shell_println!("  write <file> <text> write text to file");
     shell_println!("  stat <path>        show file info");
     shell_println!("  ln -s <target> <link> create symlink");
+    shell_println!("  drives             list detected disk drives");
     shell_println!("  lspci              list PCI devices");
     shell_println!("  view <file.bmp>    display BMP image");
     shell_println!("  clear              clear screen");
@@ -261,6 +262,25 @@ pub fn cmd_ln(args: &[String]) {
             shell_println!("ln: error {}", e.0);
         }
     });
+}
+
+pub fn cmd_drives() {
+    let count = crate::drivers::ide::drive_count();
+    if count == 0 {
+        shell_println!("No drives detected.");
+        return;
+    }
+    for i in 0..count {
+        if let Some(d) = crate::drivers::ide::drive_info(i) {
+            shell_println!(
+                "  hd{} — {} [{} MiB, LBA{}]",
+                (b'a' + i as u8) as char,
+                d.model,
+                d.size_mb(),
+                if d.lba48 { 48 } else { 28 },
+            );
+        }
+    }
 }
 
 pub fn cmd_lspci() {
