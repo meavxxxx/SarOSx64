@@ -84,23 +84,18 @@ pub extern "C" fn kernel_main() -> ! {
     arch::x86_64::timer::calibrate_tsc();
 
     let sh = proc::Process::new_kernel("shell", shell_task, 5);
-    serial_println!("[boot] shell process: {}", if sh.is_some() { "OK" } else { "FAILED" });
     if let Some(p) = sh {
         proc::scheduler::spawn(p);
-        serial_println!("[boot] shell spawned, calling schedule()");
     }
 
-    // Kick off scheduling — jumps to the shell task (never returns here).
     proc::scheduler::schedule();
 
-    serial_println!("[boot] schedule() returned — no runnable process");
     loop {
         arch::x86_64::io::hlt();
     }
 }
 
 fn shell_task() -> ! {
-    serial_println!("[shell] shell_task entered");
     shell::spawn_shell();
 }
 
