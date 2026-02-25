@@ -259,8 +259,11 @@ pub fn schedule() {
             proc.state = ProcessState::Runnable;
             proc.time_slice = proc.base_slice;
         }
+        let requeue = !matches!(proc.state, ProcessState::Dead | ProcessState::Zombie);
         drop(proc);
-        rq.queue.push(p.clone());
+        if requeue {
+            rq.queue.push(p.clone());
+        }
     }
     let next = rq.pick_next();
     if let Some(ref p) = next {
@@ -316,6 +319,24 @@ pub fn wake_up(pid: u32) {
         if proc.pid == pid && proc.state == ProcessState::Sleeping {
             proc.state = ProcessState::Runnable;
             return;
+        }
+    }
+}
+
+/// Wake every sleeping process — used by keyboard IRQ so the shell can receive input.
+pub fn wake_up_all_sleeping() {
+    let rq = RUN_QUEUE.lock();
+    for p in &rq.queue {
+        let mut proc = p.lock();
+        if proc.state == ProcessState::Sleeping {
+            proc.state = ProcessState::Runnable;
+        }
+    }
+    // Also wake the current process if it is sleeping (edge case during scheduling).
+    if let Some(ref cur) = rq.current {
+        let mut proc = cur.lock();
+        if proc.state == ProcessState::Sleeping {
+            proc.state = ProcessState::Runnable;
         }
     }
 }

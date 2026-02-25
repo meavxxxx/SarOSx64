@@ -132,6 +132,7 @@ fn process_scancode(sc: u8) {
 
         drop(mods);
         KB_BUF.lock().push(c);
+        crate::proc::wake_up_all_sleeping();
     }
 }
 

@@ -31,10 +31,6 @@ pub fn irq_timer(_frame: &mut InterruptFrame) {
 
     UPTIME_MS.fetch_add(1000 / TIMER_HZ, Ordering::Relaxed);
 
-    if tick % TIMER_HZ == 0 {
-        log::trace!("Uptime: {} s", tick / TIMER_HZ);
-    }
-
     crate::proc::scheduler::tick();
 }
 

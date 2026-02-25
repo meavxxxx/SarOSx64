@@ -71,11 +71,15 @@ pub extern "C" fn syscall_dispatch(
         SYS_EXIT | SYS_EXIT_GROUP => {
             if let Some(arc) = crate::proc::current_process() {
                 let mut p = arc.lock();
-                p.state = crate::proc::ProcessState::Zombie;
+                p.state = crate::proc::ProcessState::Dead;
                 p.exit_code = a0 as i32;
             }
             crate::proc::schedule();
-            unreachable!()
+            // schedule() returns only when no other runnable process exists;
+            // halt until the next interrupt (timer/keyboard) triggers a reschedule.
+            loop {
+                crate::arch::x86_64::io::hlt();
+            }
         }
         SYS_WAIT4 => crate::proc::fork::sys_waitpid(a0 as i32, a1, a2 as u32),
         SYS_KILL => 0,

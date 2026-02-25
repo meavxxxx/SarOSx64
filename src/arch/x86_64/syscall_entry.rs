@@ -36,11 +36,24 @@ pub unsafe extern "C" fn syscall_entry() {
         "push %r14",
         "push %r15",
 
-        "mov %r10, %rcx",
+        // Linux SYSCALL ABI:  rax=nr, rdi=a0, rsi=a1, rdx=a2, r10=a3, r8=a4, r9=a5
+        // C calling convention: rdi=1st, rsi=2nd, rdx=3rd, rcx=4th, r8=5th, r9=6th
+        // We need nr(rax) in rdi and shift a0..a5 right by one slot.
+        // a5(r9) has no register slot → push it as a stack (7th) argument.
+        "sub $8, %rsp",             // reserve slot for a5
+        "mov %r9, (%rsp)",          // a5 = r9  (7th arg, via stack)
+        "mov %r8,  %r9",            // a4 = r8
+        "mov %r10, %r8",            // a3 = r10  (Linux uses r10 for arg3 in SYSCALL)
+        "mov %rdx, %rcx",           // a2 = rdx
+        "mov %rsi, %rdx",           // a1 = rsi
+        "mov %rdi, %rsi",           // a0 = rdi
+        "mov %rax, %rdi",           // nr = rax  (syscall number)
 
         "sti",
 
         "call {handler}",
+
+        "add $8, %rsp",             // discard a5 stack slot
 
         "pop %r15",
         "pop %r14",
