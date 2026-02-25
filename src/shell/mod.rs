@@ -152,7 +152,7 @@ macro_rules! shell_println {
 pub(crate) use shell_print;
 pub(crate) use shell_println;
 
-pub fn spawn_shell() {
+pub fn spawn_shell() -> ! {
     let mut shell = Shell::new();
     shell.run();
 }
