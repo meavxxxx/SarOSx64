@@ -20,6 +20,7 @@ pub fn cmd_help() {
     shell_println!("  write <file> <text> write text to file");
     shell_println!("  stat <path>        show file info");
     shell_println!("  ln -s <target> <link> create symlink");
+    shell_println!("  lspci              list PCI devices");
     shell_println!("  view <file.bmp>    display BMP image");
     shell_println!("  clear              clear screen");
     shell_println!("  history            command history");
@@ -259,6 +260,17 @@ pub fn cmd_ln(args: &[String]) {
         if let Err(e) = vfs.symlink(&args[1], &args[2]) {
             shell_println!("ln: error {}", e.0);
         }
+    });
+}
+
+pub fn cmd_lspci() {
+    crate::drivers::pci::devices(|d| {
+        shell_println!(
+            "{:02x}:{:02x}.{} [{:04x}:{:04x}] {}",
+            d.bus, d.dev, d.func,
+            d.vendor_id, d.device_id,
+            d.class_name(),
+        );
     });
 }
 

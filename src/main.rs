@@ -75,6 +75,8 @@ pub extern "C" fn kernel_main() -> ! {
     println!("SarOS 0.1.0");
     drivers::vga::set_color(drivers::vga::WHITE, drivers::vga::BLACK);
 
+    drivers::pci::init();
+
     fs::init_rootfs();
     log::info!("Filesystem initialized");
 
