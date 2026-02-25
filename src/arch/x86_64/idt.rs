@@ -116,26 +116,32 @@ pub struct InterruptFrame {
     pub ss: u64,
 }
 
-macro_rules! isr_stub {
-    ($vector:expr, no_err) => {{
+// Per-vector naked ISR stubs: push $0 (error code) and push $N (vector).
+// Must be naked to avoid compiler-generated prologue corrupting the frame.
+macro_rules! naked_isr_no_err {
+    ($n:literal) => {{
+        #[unsafe(naked)]
         unsafe extern "C" fn stub() {
-            core::arch::asm!(
-                "push 0",
-                concat!("push ", $vector),
-                "jmp {common}",
-                common = sym isr_common,
+            core::arch::naked_asm!(
+                "push $0",
+                concat!("push $", $n),
+                "jmp {c}",
+                c = sym isr_common,
                 options(att_syntax)
             );
         }
         stub as u64
     }};
+}
 
-    ($vector:expr, err) => {{
+macro_rules! naked_isr_err {
+    ($n:literal) => {{
+        #[unsafe(naked)]
         unsafe extern "C" fn stub() {
-            core::arch::asm!(
-                concat!("push ", $vector),
-                "jmp {common}",
-                common = sym isr_common,
+            core::arch::naked_asm!(
+                concat!("push $", $n),
+                "jmp {c}",
+                c = sym isr_common,
                 options(att_syntax)
             );
         }
@@ -445,18 +451,67 @@ static mut ISR_ERR_TABLE: [u64; 256] = [0u64; 256];
 
 pub fn init_tables() {
     unsafe {
+        // Fill all with fallback stubs (vector=255 → spurious warn, not panic)
         for i in 0..256usize {
             ISR_NO_ERR_TABLE[i] = isr_no_err_stub as u64;
             ISR_ERR_TABLE[i] = isr_err_stub as u64;
         }
+
+        // Exceptions without error codes
+        ISR_NO_ERR_TABLE[0]  = naked_isr_no_err!(0);
+        ISR_NO_ERR_TABLE[1]  = naked_isr_no_err!(1);
+        ISR_NO_ERR_TABLE[2]  = naked_isr_no_err!(2);
+        ISR_NO_ERR_TABLE[3]  = naked_isr_no_err!(3);
+        ISR_NO_ERR_TABLE[4]  = naked_isr_no_err!(4);
+        ISR_NO_ERR_TABLE[5]  = naked_isr_no_err!(5);
+        ISR_NO_ERR_TABLE[6]  = naked_isr_no_err!(6);
+        ISR_NO_ERR_TABLE[7]  = naked_isr_no_err!(7);
+        ISR_NO_ERR_TABLE[9]  = naked_isr_no_err!(9);
+        ISR_NO_ERR_TABLE[16] = naked_isr_no_err!(16);
+        ISR_NO_ERR_TABLE[18] = naked_isr_no_err!(18);
+        ISR_NO_ERR_TABLE[19] = naked_isr_no_err!(19);
+        ISR_NO_ERR_TABLE[20] = naked_isr_no_err!(20);
+        ISR_NO_ERR_TABLE[21] = naked_isr_no_err!(21);
+
+        // Exceptions with error codes
+        ISR_ERR_TABLE[8]  = naked_isr_err!(8);
+        ISR_ERR_TABLE[10] = naked_isr_err!(10);
+        ISR_ERR_TABLE[11] = naked_isr_err!(11);
+        ISR_ERR_TABLE[12] = naked_isr_err!(12);
+        ISR_ERR_TABLE[13] = naked_isr_err!(13);
+        ISR_ERR_TABLE[14] = naked_isr_err!(14);
+        ISR_ERR_TABLE[17] = naked_isr_err!(17);
+
+        // IRQs 32-47 (PIC1: IRQ0=timer, IRQ1=keyboard; rest for spurious handling)
+        ISR_NO_ERR_TABLE[32] = naked_isr_no_err!(32);
+        ISR_NO_ERR_TABLE[33] = naked_isr_no_err!(33);
+        ISR_NO_ERR_TABLE[34] = naked_isr_no_err!(34);
+        ISR_NO_ERR_TABLE[35] = naked_isr_no_err!(35);
+        ISR_NO_ERR_TABLE[36] = naked_isr_no_err!(36);
+        ISR_NO_ERR_TABLE[37] = naked_isr_no_err!(37);
+        ISR_NO_ERR_TABLE[38] = naked_isr_no_err!(38);
+        ISR_NO_ERR_TABLE[39] = naked_isr_no_err!(39);
+        ISR_NO_ERR_TABLE[40] = naked_isr_no_err!(40);
+        ISR_NO_ERR_TABLE[41] = naked_isr_no_err!(41);
+        ISR_NO_ERR_TABLE[42] = naked_isr_no_err!(42);
+        ISR_NO_ERR_TABLE[43] = naked_isr_no_err!(43);
+        ISR_NO_ERR_TABLE[44] = naked_isr_no_err!(44);
+        ISR_NO_ERR_TABLE[45] = naked_isr_no_err!(45);
+        ISR_NO_ERR_TABLE[46] = naked_isr_no_err!(46);
+        ISR_NO_ERR_TABLE[47] = naked_isr_no_err!(47);
+
+        // Syscall (0x80 = 128)
+        ISR_NO_ERR_TABLE[128] = naked_isr_no_err!(128);
     }
 }
 
 #[unsafe(naked)]
 unsafe extern "C" fn isr_no_err_stub() {
+    // Fallback for unhandled vectors: push $0 (error code), $255 (catch-all vector)
+    // vector=255 hits `_ => log::warn!()` branch in interrupt_dispatch, not a panic.
     core::arch::naked_asm!(
-        "push 0",
-        "push 0",
+        "push $0",
+        "push $255",
         "jmp {c}",
         c = sym isr_common,
         options(att_syntax)
@@ -465,8 +520,9 @@ unsafe extern "C" fn isr_no_err_stub() {
 
 #[unsafe(naked)]
 unsafe extern "C" fn isr_err_stub() {
+    // Fallback for unhandled error-code exceptions: push $255 (catch-all vector)
     core::arch::naked_asm!(
-        "push 0",
+        "push $255",
         "jmp {c}",
         c = sym isr_common,
         options(att_syntax)

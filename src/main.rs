@@ -88,6 +88,9 @@ pub extern "C" fn kernel_main() -> ! {
         proc::scheduler::spawn(p);
     }
 
+    // Kick off scheduling — jumps to the shell task (never returns here).
+    proc::scheduler::schedule();
+
     loop {
         arch::x86_64::io::hlt();
     }
