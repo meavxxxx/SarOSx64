@@ -85,7 +85,7 @@ qemu-system-x86_64 -cdrom kernel.iso -m 512M -serial stdio -no-reboot -no-shutdo
 
 ```bash
 qemu-img create -f raw disk.img 512M
-qemu-system-x86_64 -cdrom kernel.iso -hda disk.img -m 512M -serial stdio -no-reboot -no-shutdown
+qemu-system-x86_64 -cdrom kernel.iso -hda disk.img -m 512M -serial stdio -no-reboot -no-shutdown -boot d
 ```
 
 Диск виден в shell как `hda` (команда `drives`).
