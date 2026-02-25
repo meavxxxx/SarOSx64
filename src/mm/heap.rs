@@ -1,5 +1,5 @@
 use crate::arch::x86_64::limine::phys_to_virt;
-use crate::mm::pmm::{align_up, alloc_zeroed_frame, free_frame, PAGE_SIZE};
+use crate::mm::pmm::{align_up, alloc_frames, alloc_zeroed_frame, free_frame, free_frames, PAGE_SIZE};
 use crate::sync::spinlock::SpinLock;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
@@ -210,8 +210,13 @@ unsafe impl GlobalAlloc for KernelHeap {
         }
 
         let pages = (align_up(size as u64, PAGE_SIZE as u64) / PAGE_SIZE as u64) as usize;
-        match alloc_zeroed_frame() {
-            Some(phys) => phys_to_virt(phys) as *mut u8,
+        let order = usize::BITS as usize - pages.next_power_of_two().leading_zeros() as usize - 1;
+        match alloc_frames(order) {
+            Some(phys) => {
+                let virt = phys_to_virt(phys) as *mut u8;
+                unsafe { core::ptr::write_bytes(virt, 0, (1 << order) * PAGE_SIZE) };
+                virt
+            }
             None => core::ptr::null_mut(),
         }
     }
@@ -232,8 +237,10 @@ unsafe impl GlobalAlloc for KernelHeap {
             }
         }
 
+        let pages = (align_up(size as u64, PAGE_SIZE as u64) / PAGE_SIZE as u64) as usize;
+        let order = usize::BITS as usize - pages.next_power_of_two().leading_zeros() as usize - 1;
         let phys = crate::arch::x86_64::limine::virt_to_phys(ptr as u64);
-        free_frame(phys);
+        free_frames(phys, order);
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
