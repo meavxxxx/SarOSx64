@@ -133,6 +133,14 @@ impl CpuGdt {
             core::arch::asm!(
                 "lgdt ({gdtr})",
 
+                // Limine enters with CS=0x28; our GDT has the TSS at 0x28.
+                // We must reload CS from our new GDT before any iretq fires.
+                "pushq $8",
+                "leaq 1f(%rip), %rax",
+                "pushq %rax",
+                "lretq",
+                "1:",
+
                 "movw {kdata:x}, %ax",
                 "movw %ax, %ds",
                 "movw %ax, %es",
@@ -147,6 +155,7 @@ impl CpuGdt {
                 gdtr = in(reg) &gdtr,
                 kdata = in(reg) SEG_KERNEL_DATA,
                 tss = in(reg) SEG_TSS,
+                out("rax") _,
                 options(att_syntax)
             );
         }
