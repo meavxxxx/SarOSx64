@@ -99,6 +99,99 @@ impl Process {
         })))
     }
 
+    /// Spawn a new user-mode process from ELF binary data.
+    /// The process starts in ring 3 via IRETQ on first scheduling.
+    pub fn new_user(
+        name: &str,
+        elf_data: &[u8],
+        argv: &[Vec<u8>],
+        envp: &[Vec<u8>],
+        priority: u8,
+    ) -> Result<Arc<SpinLock<Self>>, &'static str> {
+        use crate::arch::x86_64::gdt::{SEG_USER_CODE, SEG_USER_DATA};
+        use crate::arch::x86_64::limine::phys_to_virt;
+        use crate::mm::pmm::alloc_frames;
+
+        let pid = alloc_pid();
+
+        // Kernel stack for this process
+        let kstack_phys = alloc_frames(2).ok_or("OOM: kernel stack")?;
+        let kstack_virt = phys_to_virt(kstack_phys);
+        let kstack_top = kstack_virt + Self::KERNEL_STACK_SIZE as u64;
+
+        // User address space + ELF
+        let mut space = AddressSpace::new_user().ok_or("OOM: address space")?;
+        let mut vm = VmSpace::new();
+
+        let pie_base = if crate::proc::exec::is_pie(elf_data) {
+            crate::proc::exec::PIE_BASE
+        } else {
+            0
+        };
+        let loaded =
+            crate::proc::elf::load_elf(elf_data, &mut space, &mut vm, pie_base)
+                .map_err(|_| "ELF load failed")?;
+
+        // User stack with aux vectors
+        let argv_refs: Vec<&[u8]> = argv.iter().map(|v| v.as_slice()).collect();
+        let envp_refs: Vec<&[u8]> = envp.iter().map(|v| v.as_slice()).collect();
+        let ustack = crate::proc::stack::build_user_stack(
+            &mut space,
+            &mut vm,
+            &loaded,
+            &argv_refs,
+            &envp_refs,
+            name.as_bytes(),
+        )
+        .ok_or("user stack build failed")?;
+
+        // Set up IRETQ frame on the kernel stack so the first
+        // jump_to_context → iretq_trampoline transitions to ring 3.
+        //
+        // IRETQ pops (from low to high address):
+        //   [RIP] [CS] [RFLAGS] [RSP] [SS]
+        let frame = unsafe {
+            let p = (kstack_top as *mut u64).sub(5);
+            p.add(0).write(loaded.entry);                    // RIP
+            p.add(1).write(SEG_USER_CODE as u64);            // CS
+            p.add(2).write(0x0202u64);                       // RFLAGS (IF=1)
+            p.add(3).write(ustack.initial_rsp);              // RSP
+            p.add(4).write(SEG_USER_DATA as u64);            // SS
+            p as u64
+        };
+
+        let ctx = CpuContext {
+            rip: iretq_trampoline as u64,
+            rsp: frame,
+            rflags: 0x0202,
+            cs: crate::arch::x86_64::gdt::SEG_KERNEL_CODE as u64,
+            ss: crate::arch::x86_64::gdt::SEG_KERNEL_DATA as u64,
+            ..Default::default()
+        };
+
+        let mut name_bytes = [0u8; 32];
+        let n = name.len().min(31);
+        name_bytes[..n].copy_from_slice(&name.as_bytes()[..n]);
+
+        Ok(Arc::new(SpinLock::new(Self {
+            pid,
+            ppid: 0,
+            state: ProcessState::Runnable,
+            context: ctx,
+            address_space: space,
+            vm,
+            kernel_stack: kstack_virt,
+            kernel_stack_size: Self::KERNEL_STACK_SIZE,
+            priority,
+            time_slice: Self::DEFAULT_TIME_SLICE,
+            base_slice: Self::DEFAULT_TIME_SLICE,
+            exit_code: 0,
+            name: name_bytes,
+            pending_signals: 0,
+            signal_mask: 0,
+        })))
+    }
+
     pub fn name_str(&self) -> &str {
         let end = self.name.iter().position(|&b| b == 0).unwrap_or(32);
         core::str::from_utf8(&self.name[..end]).unwrap_or("???")
@@ -275,6 +368,14 @@ unsafe extern "C" fn jump_to_context(ctx: *const CpuContext) {
         "jmp *56(%rdi)",
         options(att_syntax)
     );
+}
+
+/// First entry point for a new user-mode process.
+/// The kernel stack was set up with an IRETQ frame by Process::new_user.
+/// IRETQ pops: RIP, CS, RFLAGS, RSP, SS → ring 3.
+#[unsafe(naked)]
+pub unsafe extern "C" fn iretq_trampoline() -> ! {
+    core::arch::naked_asm!("iretq", options(att_syntax));
 }
 
 pub mod scheduler {

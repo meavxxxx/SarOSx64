@@ -6,7 +6,7 @@ use crate::proc::elf::{load_elf, ElfError, LoadedElf};
 use crate::proc::stack::{build_user_stack, UserStack, USER_STACK_TOP};
 use alloc::vec::Vec;
 
-const PIE_BASE: u64 = 0x0000_5555_5555_0000;
+pub const PIE_BASE: u64 = 0x0000_5555_5555_0000;
 
 const INTERP_BASE: u64 = 0x0000_7FFF_0000_0000;
 
@@ -140,7 +140,7 @@ unsafe extern "C" fn jump_to_user(entry: u64, user_rsp: u64, user_cs: u64, user_
     );
 }
 
-fn is_pie(data: &[u8]) -> bool {
+pub fn is_pie(data: &[u8]) -> bool {
     if data.len() < 18 {
         return false;
     }
@@ -263,8 +263,14 @@ fn read_user_string_array(
     Some(result)
 }
 
-fn lookup_and_read_file(space: &AddressSpace, path: &[u8]) -> Option<Vec<u8>> {
-    use crate::proc::exec::INITRD;
+fn lookup_and_read_file(_space: &AddressSpace, path: &[u8]) -> Option<Vec<u8>> {
+    // 1. Try VFS (ramfs + mounted filesystems)
+    let path_str = core::str::from_utf8(path).ok()?.trim_end_matches('\0');
+    if let Ok(data) = crate::fs::mount::with_vfs(|vfs| vfs.read_file(path_str)) {
+        return Some(data);
+    }
+
+    // 2. Fallback: CPIO initrd (if present)
     if let Some(initrd) = unsafe { INITRD } {
         find_in_cpio(initrd, path)
     } else {

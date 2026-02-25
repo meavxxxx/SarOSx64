@@ -72,6 +72,7 @@ impl Shell {
             "write" => builtins::cmd_write(rest),
             "stat" => builtins::cmd_stat(rest),
             "ln" => builtins::cmd_ln(rest),
+            "run"    => builtins::cmd_run(rest),
             "mount"  => builtins::cmd_mount(rest),
             "umount" => builtins::cmd_umount(rest),
             "drives" => builtins::cmd_drives(),

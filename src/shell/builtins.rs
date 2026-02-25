@@ -20,6 +20,7 @@ pub fn cmd_help() {
     shell_println!("  write <file> <text> write text to file");
     shell_println!("  stat <path>        show file info");
     shell_println!("  ln -s <target> <link> create symlink");
+    shell_println!("  run <file> [args]  execute ELF binary from VFS");
     shell_println!("  mount [n /path]    mount drive n at /path (no args: list mounts)");
     shell_println!("  umount <path>      unmount filesystem");
     shell_println!("  drives             list detected disk drives");
@@ -264,6 +265,51 @@ pub fn cmd_ln(args: &[String]) {
             shell_println!("ln: error {}", e.0);
         }
     });
+}
+
+pub fn cmd_run(args: &[String]) {
+    if args.is_empty() {
+        shell_println!("run: usage: run <path> [args...]");
+        return;
+    }
+    let path = &args[0];
+
+    let elf_data = match with_vfs(|vfs| vfs.read_file(path)) {
+        Ok(d) => d,
+        Err(e) => {
+            shell_println!("run: {}: error {}", path, e.0);
+            return;
+        }
+    };
+
+    if !crate::proc::elf::is_valid_elf(&elf_data) {
+        shell_println!("run: {}: not a valid ELF64 binary", path);
+        return;
+    }
+
+    let argv: alloc::vec::Vec<alloc::vec::Vec<u8>> = args
+        .iter()
+        .map(|s| {
+            let mut v = s.as_bytes().to_vec();
+            v.push(0);
+            v
+        })
+        .collect();
+
+    let envp: alloc::vec::Vec<alloc::vec::Vec<u8>> = alloc::vec![
+        b"PATH=/bin\0".to_vec(),
+        b"HOME=/root\0".to_vec(),
+        b"TERM=linux\0".to_vec(),
+    ];
+
+    match crate::proc::Process::new_user(path, &elf_data, &argv, &envp, 5) {
+        Ok(proc) => {
+            let pid = proc.lock().pid;
+            crate::proc::spawn(proc);
+            shell_println!("Spawned '{}' as pid {}", path, pid);
+        }
+        Err(e) => shell_println!("run: {}: {}", path, e),
+    }
 }
 
 pub fn cmd_mount(args: &[String]) {

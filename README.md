@@ -103,6 +103,7 @@ qemu-system-x86_64 -cdrom kernel.iso -hda disk.img -m 512M -serial stdio -no-reb
 - [x] ATA/IDE PIO driver (LBA28/LBA48)
 - [x] MBR partition table reader
 - [x] FAT32 read-only filesystem (LFN support, VFS-integrated)
+- [x] ELF64 loader + ring 3 user-space (PIE/static, aux vectors, CoW fork)
 - [ ] ELF loader
 - [ ] Ring 3 user-space + изоляция памяти
 - [ ] Минимальная libc / musl
