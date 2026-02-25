@@ -197,7 +197,14 @@ pub fn schedule() {
         }
     } else if let Some(a) = next {
         unsafe {
-            jump_to_context(&a.lock().context as *const CpuContext);
+            // Must drop the SpinGuard BEFORE jumping — jump_to_context never
+            // returns, so a temporary created in the call expression would
+            // never be dropped, leaking the process SpinLock forever.
+            let ctx_ptr = {
+                let g = a.lock();
+                &g.context as *const CpuContext
+            }; // lock released here; pointer stays valid (Arc keeps data alive)
+            jump_to_context(ctx_ptr);
         }
     }
 }
