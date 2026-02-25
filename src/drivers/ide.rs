@@ -116,8 +116,8 @@ fn ata_string(words: &[u16], word_start: usize, word_count: usize) -> String {
         bytes.push((w & 0xFF) as u8);
     }
     // trim trailing spaces
-    let s = core::str::from_utf8(&bytes).unwrap_or("").trim_end().to_owned();
-    s
+    let s = core::str::from_utf8(&bytes).unwrap_or("").trim_end();
+    String::from(s)
 }
 
 // ─── Identify ────────────────────────────────────────────────────────────────
