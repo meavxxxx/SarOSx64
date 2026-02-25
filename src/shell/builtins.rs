@@ -20,6 +20,7 @@ pub fn cmd_help() {
     shell_println!("  write <file> <text> write text to file");
     shell_println!("  stat <path>        show file info");
     shell_println!("  ln -s <target> <link> create symlink");
+    shell_println!("  view <file.bmp>    display BMP image");
     shell_println!("  clear              clear screen");
     shell_println!("  history            command history");
     shell_println!("  uname              system info");
@@ -259,6 +260,36 @@ pub fn cmd_ln(args: &[String]) {
             shell_println!("ln: error {}", e.0);
         }
     });
+}
+
+pub fn cmd_view(args: &[String]) {
+    if args.is_empty() {
+        shell_println!("view: usage: view <file.bmp>");
+        return;
+    }
+    let path = args[0].as_str();
+    let data = match with_vfs(|vfs| vfs.read_file(path)) {
+        Ok(d) => d,
+        Err(e) => {
+            shell_println!("view: {}: error {}", path, e.0);
+            return;
+        }
+    };
+    match crate::drivers::bmp::decode(&data) {
+        Some(bmp) => {
+            shell_println!(
+                "Displaying {}x{} — press any key to exit",
+                bmp.width,
+                bmp.height
+            );
+            crate::drivers::vga::draw_bitmap(&bmp);
+            crate::drivers::keyboard::read_char_blocking();
+            crate::drivers::vga::clear();
+        }
+        None => {
+            shell_println!("view: {}: unsupported format (24-bit uncompressed BMP only)", path);
+        }
+    }
 }
 
 pub fn cmd_clear() {

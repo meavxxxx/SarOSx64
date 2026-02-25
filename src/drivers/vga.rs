@@ -217,6 +217,49 @@ pub fn clear() {
     SCREEN.lock().clear();
 }
 
+/// Draw a bitmap scaled to fit the screen (nearest-neighbour, aspect-ratio preserved).
+pub fn draw_bitmap(bmp: &crate::drivers::bmp::Bitmap) {
+    let mut scr = SCREEN.lock();
+    if scr.base.is_null() {
+        return;
+    }
+
+    let sw = scr.width;
+    let sh = scr.height;
+    let iw = bmp.width;
+    let ih = bmp.height;
+
+    // Clear to black
+    let total = sh * scr.pitch;
+    unsafe {
+        core::ptr::write_bytes(scr.base, 0, total);
+    }
+    scr.col = 0;
+    scr.row = 0;
+
+    // Compute destination rectangle that fits within screen, keeping aspect ratio.
+    // Compare sw/iw vs sh/ih using cross-multiplication to avoid division.
+    let (dst_w, dst_h) = if sw * ih <= sh * iw {
+        // width is the limiting dimension
+        (sw, ih * sw / iw)
+    } else {
+        // height is the limiting dimension
+        (iw * sh / ih, sh)
+    };
+
+    let off_x = (sw - dst_w) / 2;
+    let off_y = (sh - dst_h) / 2;
+
+    for dy in 0..dst_h {
+        let sy = dy * ih / dst_h;
+        for dx in 0..dst_w {
+            let sx = dx * iw / dst_w;
+            let color = bmp.pixels[sy * iw + sx];
+            scr.put_pixel(off_x + dx, off_y + dy, color);
+        }
+    }
+}
+
 use core::fmt;
 
 struct VgaWriter;

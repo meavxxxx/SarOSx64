@@ -27,6 +27,12 @@ pub fn init_rootfs() {
             "/etc/motd",
             b"Welcome to SarOS!\nType 'help' for available commands.\n",
         );
+
+        let _ = vfs.mkdir("/images");
+        let _ = vfs.write_file(
+            "/images/image.bmp",
+            include_bytes!("../drivers/image.bmp"),
+        );
     });
 
     log::info!("VFS: rootfs (ramfs) mounted at /");

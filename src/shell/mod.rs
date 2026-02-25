@@ -72,6 +72,7 @@ impl Shell {
             "write" => builtins::cmd_write(rest),
             "stat" => builtins::cmd_stat(rest),
             "ln" => builtins::cmd_ln(rest),
+            "view" => builtins::cmd_view(rest),
             "clear" => builtins::cmd_clear(),
             "history" => {
                 for (i, h) in self.history.iter().enumerate() {

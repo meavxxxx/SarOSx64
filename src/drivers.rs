@@ -1,3 +1,4 @@
+pub mod bmp;
 pub mod keyboard;
 pub mod logger;
 pub mod serial;
