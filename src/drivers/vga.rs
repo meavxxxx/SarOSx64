@@ -191,7 +191,22 @@ pub fn write_str(s: &str) {
     if scr.base.is_null() {
         return;
     }
-    scr.write_str(s);
+    // Strip ANSI/VT100 CSI escape sequences (ESC [ ... <final 0x40-0x7E>)
+    // so they don't appear as garbage on the framebuffer.
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == 0x1b && i + 1 < b.len() && b[i + 1] == b'[' {
+            i += 2;
+            while i < b.len() && !(b[i] >= 0x40 && b[i] <= 0x7e) {
+                i += 1;
+            }
+            i += 1; // skip final byte
+        } else {
+            scr.put_char(b[i]);
+            i += 1;
+        }
+    }
 }
 
 pub fn set_color(fg: Color, bg: Color) {
