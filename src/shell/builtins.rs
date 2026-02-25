@@ -20,6 +20,8 @@ pub fn cmd_help() {
     shell_println!("  write <file> <text> write text to file");
     shell_println!("  stat <path>        show file info");
     shell_println!("  ln -s <target> <link> create symlink");
+    shell_println!("  mount [n /path]    mount drive n at /path (no args: list mounts)");
+    shell_println!("  umount <path>      unmount filesystem");
     shell_println!("  drives             list detected disk drives");
     shell_println!("  lspci              list PCI devices");
     shell_println!("  view <file.bmp>    display BMP image");
@@ -260,6 +262,50 @@ pub fn cmd_ln(args: &[String]) {
     with_vfs(|vfs| {
         if let Err(e) = vfs.symlink(&args[1], &args[2]) {
             shell_println!("ln: error {}", e.0);
+        }
+    });
+}
+
+pub fn cmd_mount(args: &[String]) {
+    if args.len() < 2 {
+        // List mounts
+        with_vfs(|vfs| {
+            for mp in vfs.list_mounts() {
+                shell_println!("  {}", mp);
+            }
+        });
+        return;
+    }
+
+    // mount <drive_idx> <mountpoint>
+    let drive_idx: usize = match args[0].parse() {
+        Ok(n) => n,
+        Err(_) => { shell_println!("mount: invalid drive index"); return; }
+    };
+    let mountpoint = args[1].as_str();
+
+    match crate::fs::fat32::probe_drive(drive_idx) {
+        Some(fs) => {
+            with_vfs(|vfs| {
+                if let Err(e) = vfs.mount(mountpoint, fs) {
+                    shell_println!("mount: error {}", e.0);
+                } else {
+                    shell_println!("mounted drive {} at {}", drive_idx, mountpoint);
+                }
+            });
+        }
+        None => shell_println!("mount: no supported filesystem found on drive {}", drive_idx),
+    }
+}
+
+pub fn cmd_umount(args: &[String]) {
+    if args.is_empty() {
+        shell_println!("umount: usage: umount <mountpoint>");
+        return;
+    }
+    with_vfs(|vfs| {
+        if let Err(e) = vfs.umount(&args[0]) {
+            shell_println!("umount: {}: error {}", args[0], e.0);
         }
     });
 }

@@ -39,11 +39,13 @@
 | `bmp.rs` | Декодер 24-bit uncompressed BMP |
 | `pci.rs` | Перечисление PCI bus (порты 0xCF8/0xCFC), BAR, IRQ |
 | `ide.rs` | ATA PIO LBA28/LBA48, master/slave, primary/secondary |
+| `fat32.rs` | Read-only FAT32, LFN support, MBR partition detection |
+| `mbr.rs` | MBR partition table reader |
 
 ### Shell
 Встроенные команды: `help`, `ls`, `cd`, `pwd`, `cat`, `echo`, `mkdir`, `touch`, `rm`, `rmdir`,
-`mv`, `cp`, `write`, `stat`, `ln`, `view`, `lspci`, `drives`, `clear`, `history`,
-`uname`, `uptime`, `free`, `reboot`, `halt`
+`mv`, `cp`, `write`, `stat`, `ln`, `view`, `lspci`, `drives`, `mount`, `umount`,
+`clear`, `history`, `uname`, `uptime`, `free`, `reboot`, `halt`
 
 ### Syscall
 Linux-совместимые номера. Обрабатываются: `read`/`write`, `fork`/`vfork`, `execve`, `exit`,
@@ -99,7 +101,8 @@ qemu-system-x86_64 -cdrom kernel.iso -hda disk.img -m 512M -serial stdio -no-reb
 
 - [x] PCI bus enumeration
 - [x] ATA/IDE PIO driver (LBA28/LBA48)
-- [ ] ext2 / FAT32 с диска
+- [x] MBR partition table reader
+- [x] FAT32 read-only filesystem (LFN support, VFS-integrated)
 - [ ] ELF loader
 - [ ] Ring 3 user-space + изоляция памяти
 - [ ] Минимальная libc / musl

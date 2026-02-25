@@ -1,3 +1,5 @@
+pub mod fat32;
+pub mod mbr;
 pub mod mount;
 pub mod path;
 pub mod ramfs;

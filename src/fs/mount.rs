@@ -9,6 +9,9 @@ pub struct VfsContext {
     pub root: Arc<Inode>,
     pub cwd: Arc<Inode>,
     pub cwd_path: String,
+    /// Mount table: (absolute_mount_point, fs_root_inode)
+    /// Sorted longest-first for correct prefix matching.
+    mounts: Vec<(String, Arc<Inode>)>,
 }
 
 impl VfsContext {
@@ -18,35 +21,107 @@ impl VfsContext {
             root,
             cwd,
             cwd_path: "/".to_string(),
+            mounts: Vec::new(),
         }
     }
 
-    pub fn resolve(&self, path: &str) -> Result<Arc<Inode>, Errno> {
-        path::resolve(&self.root, &self.cwd, path)
+    // ── Path helpers ──────────────────────────────────────────────────────────
+
+    fn make_absolute(&self, path: &str) -> String {
+        if path.starts_with('/') {
+            path.to_string()
+        } else if self.cwd_path == "/" {
+            alloc::format!("/{}", path)
+        } else {
+            alloc::format!("{}/{}", self.cwd_path, path)
+        }
     }
 
+    /// Resolve an *absolute* path, checking the mount table first.
+    fn resolve_abs(&self, abs: &str) -> Result<Arc<Inode>, Errno> {
+        for (mp, fs_root) in &self.mounts {
+            if abs == mp.as_str() {
+                return Ok(Arc::clone(fs_root));
+            }
+            // path is inside this mount: e.g. mp="/mnt/d" abs="/mnt/d/foo"
+            let prefix = alloc::format!("{}/", mp);
+            if abs.starts_with(prefix.as_str()) {
+                let rel = &abs[mp.len()..]; // e.g. "/foo"
+                return path::resolve(fs_root, fs_root, rel);
+            }
+        }
+        path::resolve(&self.root, &self.cwd, abs)
+    }
+
+    pub fn resolve(&self, path: &str) -> Result<Arc<Inode>, Errno> {
+        let abs = self.make_absolute(path);
+        self.resolve_abs(&abs)
+    }
+
+    // ── Mount ─────────────────────────────────────────────────────────────────
+
+    /// Mount `fs` at `mountpoint` (absolute path).
+    /// Creates the directory in ramfs if it doesn't exist yet.
+    pub fn mount(&mut self, mountpoint: &str, fs: Arc<dyn Filesystem>) -> Result<(), Errno> {
+        let mp = if mountpoint.ends_with('/') && mountpoint != "/" {
+            mountpoint.trim_end_matches('/').to_string()
+        } else {
+            mountpoint.to_string()
+        };
+
+        // Ensure mount point directory exists in ramfs
+        self.mkdir_p(&mp).ok();
+
+        let fs_root = fs.root();
+
+        // Insert sorted by length descending (longest prefix matches first)
+        let pos = self.mounts
+            .iter()
+            .position(|(existing, _)| existing.len() < mp.len())
+            .unwrap_or(self.mounts.len());
+        self.mounts.insert(pos, (mp.clone(), fs_root));
+
+        log::info!("VFS: mounted {} at {}", fs.name(), mp);
+        Ok(())
+    }
+
+    pub fn umount(&mut self, mountpoint: &str) -> Result<(), Errno> {
+        let before = self.mounts.len();
+        self.mounts.retain(|(mp, _)| mp.as_str() != mountpoint);
+        if self.mounts.len() == before {
+            Err(Errno::ENOENT)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn list_mounts(&self) -> Vec<String> {
+        self.mounts.iter().map(|(mp, _)| mp.clone()).collect()
+    }
+
+    // ── VFS operations ────────────────────────────────────────────────────────
+
     pub fn open(&self, path: &str, flags: u32) -> Result<Arc<File>, Errno> {
-        let inode = match path::resolve(&self.root, &self.cwd, path) {
+        let inode = match self.resolve(path) {
             Ok(i) => {
-                if flags & O_CREAT != 0 {
-                    if flags & O_TRUNC != 0 {
-                        i.ops.truncate(0)?;
-                    }
+                if flags & O_CREAT != 0 && flags & O_TRUNC != 0 {
+                    i.ops.truncate(0)?;
                 }
                 i
             }
             Err(Errno::ENOENT) if flags & O_CREAT != 0 => {
-                let (parent, name) = path::resolve_parent(&self.root, &self.cwd, path)?;
+                let abs = self.make_absolute(path);
+                let (parent, name) = path::resolve_parent(&self.root, &self.cwd, &abs)?;
                 parent.ops.create(name, 0o644)?
             }
             Err(e) => return Err(e),
         };
-
         Ok(File::new(inode, flags))
     }
 
     pub fn mkdir(&self, path: &str) -> Result<(), Errno> {
-        let (parent, name) = path::resolve_parent(&self.root, &self.cwd, path)?;
+        let abs = self.make_absolute(path);
+        let (parent, name) = path::resolve_parent(&self.root, &self.cwd, &abs)?;
         parent.ops.mkdir(name, 0o755)?;
         Ok(())
     }
@@ -77,12 +152,14 @@ impl VfsContext {
     }
 
     pub fn unlink(&self, path: &str) -> Result<(), Errno> {
-        let (parent, name) = path::resolve_parent(&self.root, &self.cwd, path)?;
+        let abs = self.make_absolute(path);
+        let (parent, name) = path::resolve_parent(&self.root, &self.cwd, &abs)?;
         parent.ops.unlink(name)
     }
 
     pub fn rmdir(&self, path: &str) -> Result<(), Errno> {
-        let (parent, name) = path::resolve_parent(&self.root, &self.cwd, path)?;
+        let abs = self.make_absolute(path);
+        let (parent, name) = path::resolve_parent(&self.root, &self.cwd, &abs)?;
         parent.ops.rmdir(name)
     }
 
@@ -108,23 +185,13 @@ impl VfsContext {
             return Err(Errno::ENOTDIR);
         }
         self.cwd = inode;
-        if path.starts_with('/') {
-            self.cwd_path = path.to_string();
-        } else if path == ".." {
-            if let Some(pos) = self.cwd_path.rfind('/') {
-                if pos == 0 {
-                    self.cwd_path = "/".to_string();
-                } else {
-                    self.cwd_path = self.cwd_path[..pos].to_string();
-                }
-            }
+        let abs = self.make_absolute(path);
+        // Normalize: strip trailing slash except root
+        self.cwd_path = if abs == "/" {
+            abs
         } else {
-            if self.cwd_path == "/" {
-                self.cwd_path = alloc::format!("/{}", path);
-            } else {
-                self.cwd_path = alloc::format!("{}/{}", self.cwd_path, path);
-            }
-        }
+            abs.trim_end_matches('/').to_string()
+        };
         Ok(())
     }
 
