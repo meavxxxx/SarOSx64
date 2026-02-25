@@ -179,12 +179,11 @@ pub fn init() {
         screen.clear();
     }
 
-    log::info!(
-        "Framebuffer: {}x{} {}bpp",
-        SCREEN.lock().width,
-        SCREEN.lock().height,
-        SCREEN.lock().bpp * 8
-    );
+    let (w, h, bpp) = {
+        let scr = SCREEN.lock();
+        (scr.width, scr.height, scr.bpp * 8)
+    };
+    log::info!("Framebuffer: {}x{} {}bpp", w, h, bpp);
 }
 
 pub fn write_str(s: &str) {

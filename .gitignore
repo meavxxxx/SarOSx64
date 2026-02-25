@@ -2,7 +2,8 @@
 *.iso
 iso/
 qemu.log
-EOF
 build.log
 target/
 limine/
+CLAUDE.md
+.claude/settings.local.json
