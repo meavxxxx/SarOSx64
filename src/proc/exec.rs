@@ -1,5 +1,6 @@
 use crate::arch::x86_64::gdt::{set_kernel_stack, SEG_USER_CODE, SEG_USER_DATA};
 use crate::arch::x86_64::idt::InterruptFrame;
+use crate::arch::x86_64::syscall_entry::set_kernel_stack as set_syscall_kernel_stack;
 use crate::mm::pmm::PAGE_SIZE;
 use crate::mm::vmm::{AddressSpace, VmSpace, PTE_NO_EXEC, PTE_PRESENT, PTE_USER, PTE_WRITABLE};
 use crate::proc::elf::{load_elf, ElfError, LoadedElf};
@@ -87,6 +88,7 @@ pub fn exec(
 
         let kstack_top = proc.kernel_stack + proc.kernel_stack_size as u64;
         set_kernel_stack(kstack_top);
+        set_syscall_kernel_stack(kstack_top);
     }
 
     proc_arc.lock().address_space.activate();

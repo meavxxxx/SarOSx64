@@ -1,9 +1,39 @@
-use crate::arch::x86_64::gdt::{SEG_KERNEL_CODE, SEG_USER_DATA};
-use crate::arch::x86_64::io::{rdmsr, wrmsr, EFER_SCE, MSR_EFER, MSR_LSTAR, MSR_SFMASK, MSR_STAR};
+use crate::arch::x86_64::gdt::{current_tss, SEG_KERNEL_CODE, SEG_USER_DATA};
+use crate::arch::x86_64::io::{
+    rdmsr, wrmsr, EFER_SCE, MSR_EFER, MSR_GS_BASE, MSR_KERNEL_GS, MSR_LSTAR, MSR_SFMASK, MSR_STAR,
+};
+
+#[repr(C, align(16))]
+struct SyscallCpuLocal {
+    _reserved: u64,
+    kernel_rsp: u64,
+    user_rsp: u64,
+}
+
+static mut SYSCALL_CPU_LOCAL: SyscallCpuLocal = SyscallCpuLocal {
+    _reserved: 0,
+    kernel_rsp: 0,
+    user_rsp: 0,
+};
+
+pub fn set_kernel_stack(rsp: u64) {
+    unsafe {
+        SYSCALL_CPU_LOCAL.kernel_rsp = rsp;
+    }
+}
 
 /// Инициализация SYSCALL/SYSRET
 pub fn init_syscall() {
     unsafe {
+        // swapgs uses KERNEL_GS on syscall entry from ring 3; keep a small
+        // per-cpu area there with kernel stack top at +8 and saved user RSP at +16.
+        SYSCALL_CPU_LOCAL.kernel_rsp = current_tss().rsp[0];
+        SYSCALL_CPU_LOCAL.user_rsp = 0;
+
+        let gs_base = core::ptr::addr_of!(SYSCALL_CPU_LOCAL) as u64;
+        wrmsr(MSR_GS_BASE, 0);
+        wrmsr(MSR_KERNEL_GS, gs_base);
+
         let efer = rdmsr(MSR_EFER);
         wrmsr(MSR_EFER, efer | EFER_SCE);
 

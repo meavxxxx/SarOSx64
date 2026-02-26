@@ -280,6 +280,7 @@ pub fn schedule() {
         unsafe {
             let kst = new_a.lock().kernel_stack + Process::KERNEL_STACK_SIZE as u64;
             crate::arch::x86_64::gdt::set_kernel_stack(kst);
+            crate::arch::x86_64::syscall_entry::set_kernel_stack(kst);
             {
                 let op = old_a.lock();
                 let np = new_a.lock();
