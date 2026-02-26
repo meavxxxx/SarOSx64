@@ -407,7 +407,7 @@ pub fn cmd_view(args: &[String]) {
                 bmp.height
             );
             crate::drivers::vga::draw_bitmap(&bmp);
-            crate::drivers::keyboard::read_char_blocking();
+            crate::drivers::keyboard::wait_key();
             crate::drivers::vga::clear();
         }
         None => {

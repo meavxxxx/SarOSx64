@@ -167,9 +167,17 @@ pub fn read_char() -> Option<u8> {
     KB_BUF.lock().pop()
 }
 
-pub fn read_char_blocking() -> u8 {
+/// Race-free blocking read: holds IF=0 across the check-and-sleep transition
+/// so a keyboard IRQ cannot arrive after the buffer check but before the
+/// process is marked Sleeping (which would leave it asleep with data pending).
+pub fn wait_key() -> u8 {
+    use crate::arch::x86_64::io::{cli, sti, RFLAGS_IF};
     loop {
+        let rflags = unsafe { cli() };
         if let Some(c) = read_char() {
+            if rflags & RFLAGS_IF != 0 {
+                sti();
+            }
             return c;
         }
         crate::proc::scheduler::sleep_current();
