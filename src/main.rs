@@ -81,6 +81,9 @@ pub extern "C" fn kernel_main() -> ! {
     fs::init_rootfs();
     log::info!("Filesystem initialized");
 
+    drivers::keyboard::init();
+    log::info!("Keyboard i8042 initialized");
+
     arch::x86_64::io::sti();
     log::info!("Interrupts enabled");
 

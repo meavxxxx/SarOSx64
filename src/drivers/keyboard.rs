@@ -1,9 +1,60 @@
 use crate::arch::x86_64::idt::InterruptFrame;
-use crate::arch::x86_64::io::inb;
+use crate::arch::x86_64::io::{inb, outb};
 use crate::sync::spinlock::SpinLock;
 
 const KB_DATA: u16 = 0x60;
 const KB_STATUS: u16 = 0x64;
+
+/// Wait until the i8042 input buffer is empty (bit 1 of status port).
+/// Must be called before writing a command or data byte to the controller.
+fn i8042_wait_write() {
+    unsafe {
+        while inb(KB_STATUS) & 0x02 != 0 {
+            core::hint::spin_loop();
+        }
+    }
+}
+
+/// Wait until the i8042 output buffer has data ready (bit 0 of status port).
+fn i8042_wait_read() {
+    unsafe {
+        while inb(KB_STATUS) & 0x01 == 0 {
+            core::hint::spin_loop();
+        }
+    }
+}
+
+/// Initialize the i8042 PS/2 controller:
+/// - Flush the output buffer
+/// - Read the Controller Configuration Byte (CCB)
+/// - Set bit 0 (Keyboard Interrupt Enable) so IRQ1 fires on keypress
+/// - Write the CCB back
+pub fn init() {
+    unsafe {
+        // Flush any stale bytes from the i8042 output buffer.
+        while inb(KB_STATUS) & 0x01 != 0 {
+            let _ = inb(KB_DATA);
+        }
+
+        // Command 0x20 = "Read CCB"; result arrives at port 0x60.
+        i8042_wait_write();
+        outb(KB_STATUS, 0x20);
+        i8042_wait_read();
+        let ccb = inb(KB_DATA);
+        crate::serial_println!("[KB] i8042 CCB = {:#04x}", ccb);
+
+        // Bit 0 = Keyboard Interrupt Enable (KIE).
+        // Bit 4 = Keyboard Clock Disable — clear it so the keyboard is enabled.
+        let new_ccb = (ccb | 0x01) & !0x10;
+
+        // Command 0x60 = "Write CCB"; follow with the new byte on port 0x60.
+        i8042_wait_write();
+        outb(KB_STATUS, 0x60);
+        i8042_wait_write();
+        outb(KB_DATA, new_ccb);
+        crate::serial_println!("[KB] i8042 CCB → {:#04x} (KIE=1)", new_ccb);
+    }
+}
 
 static SCANCODE_MAP: &[u8] = &[
     0, 27, b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'0', b'-', b'=', 8, 9, b'q',
