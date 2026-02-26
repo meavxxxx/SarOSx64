@@ -78,6 +78,7 @@ const SC_BREAK: u8 = 0x80;
 
 pub fn irq_keyboard(_frame: &mut InterruptFrame) {
     let sc = unsafe { inb(KB_DATA) };
+    crate::serial_println!("[KB] sc={:#04x}", sc);
     process_scancode(sc);
 }
 
