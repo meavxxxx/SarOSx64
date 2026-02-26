@@ -243,13 +243,16 @@ fn irq_dispatch(irq: u8, frame: &mut InterruptFrame) {
         return;
     }
 
+    // Send EOI before the handler so the PIC can deliver other IRQs
+    // (e.g. keyboard/IRQ1) even if the timer handler triggers a context
+    // switch that keeps IRQ0 "in service" in the PIC until idle resumes.
+    pic::send_eoi(irq);
+
     match irq {
         0 => crate::arch::x86_64::timer::irq_timer(frame),
         1 => crate::drivers::keyboard::irq_keyboard(frame),
         _ => log::debug!("Unhandled IRQ {}", irq),
     }
-
-    pic::send_eoi(irq);
 }
 
 fn exc_divide_error(frame: &InterruptFrame) {
