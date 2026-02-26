@@ -232,6 +232,23 @@ pub fn current_process() -> Option<Arc<SpinLock<Process>>> {
     RUN_QUEUE.lock().current.clone()
 }
 
+pub fn process_state(pid: u32) -> Option<ProcessState> {
+    let rq = RUN_QUEUE.lock();
+    if let Some(ref cur) = rq.current {
+        let p = cur.lock();
+        if p.pid == pid {
+            return Some(p.state);
+        }
+    }
+    for proc in &rq.queue {
+        let p = proc.lock();
+        if p.pid == pid {
+            return Some(p.state);
+        }
+    }
+    None
+}
+
 pub fn tick() {
     let preempt = {
         let mut rq = RUN_QUEUE.lock();

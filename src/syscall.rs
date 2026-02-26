@@ -116,6 +116,7 @@ pub mod fs {
             let slice = unsafe { core::slice::from_raw_parts(buf, count) };
             if let Ok(s) = core::str::from_utf8(slice) {
                 crate::drivers::serial::write_str(s);
+                crate::drivers::vga::write_str(s);
             }
             return count as i64;
         }

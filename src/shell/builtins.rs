@@ -307,6 +307,15 @@ pub fn cmd_run(args: &[String]) {
             let pid = proc.lock().pid;
             crate::proc::spawn(proc);
             shell_println!("Spawned '{}' as pid {}", path, pid);
+            // Foreground run: yield until child exits so shell prompt stays coherent.
+            loop {
+                match crate::proc::process_state(pid) {
+                    None
+                    | Some(crate::proc::ProcessState::Dead)
+                    | Some(crate::proc::ProcessState::Zombie) => break,
+                    _ => crate::proc::scheduler::schedule(),
+                }
+            }
         }
         Err(e) => shell_println!("run: {}: {}", path, e),
     }
