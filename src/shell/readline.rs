@@ -1,10 +1,33 @@
 use alloc::string::String;
+use crate::arch::x86_64::io::{cli, sti, RFLAGS_IF};
+
+fn read_char_blocking() -> u8 {
+    loop {
+        // Disable interrupts BEFORE checking KB_BUF to close the race window
+        // between "buffer empty" check and "set state to Sleeping".
+        // If a keyboard IRQ fires in that window while the shell is still
+        // Running, wake_up_all_sleeping won't set it Runnable → shell sleeps
+        // forever with a char stuck in the buffer.
+        let rflags = unsafe { cli() };
+        if let Some(c) = crate::drivers::keyboard::read_char() {
+            if rflags & RFLAGS_IF != 0 {
+                sti();
+            }
+            return c;
+        }
+        // Buffer was empty; sleep with IF=0.  context_switch will restore
+        // IF=1 (via `or $0x200`) in the next scheduled process, so keyboard
+        // IRQs can fire once idle is running, but not in this narrow window.
+        crate::proc::scheduler::sleep_current();
+        // After waking up the loop restarts and calls cli() again.
+    }
+}
 
 pub fn readline() -> String {
     let mut line = String::new();
 
     loop {
-        let c = crate::drivers::keyboard::read_char_blocking();
+        let c = read_char_blocking();
 
         match c {
             b'\n' | b'\r' => {
