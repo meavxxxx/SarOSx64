@@ -1,9 +1,10 @@
 use alloc::string::String;
-use crate::arch::x86_64::io::{cli, sti, RFLAGS_IF};
+use crate::arch::x86_64::io::{cli, hlt, sti, RFLAGS_IF};
 
 fn read_char_blocking() -> u8 {
     loop {
         let rflags = unsafe { cli() };
+        crate::drivers::keyboard::poll();
         if let Some(c) = crate::drivers::keyboard::read_char() {
             if rflags & RFLAGS_IF != 0 {
                 sti();
@@ -11,9 +12,10 @@ fn read_char_blocking() -> u8 {
             crate::serial_println!("[KB] got char={:#04x}", c);
             return c;
         }
-        crate::serial_println!("[KB] sleeping...");
-        crate::proc::scheduler::sleep_current();
-        crate::serial_println!("[KB] woke up");
+        if rflags & RFLAGS_IF != 0 {
+            sti();
+        }
+        hlt();
     }
 }
 

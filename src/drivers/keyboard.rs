@@ -179,6 +179,20 @@ pub fn irq_keyboard(_frame: &mut InterruptFrame) {
     process_scancode(sc);
 }
 
+/// Poll controller output buffer and process pending scancodes without IRQ.
+/// Useful as a fallback on setups where IRQ1 delivery is unreliable.
+pub fn poll() {
+    unsafe {
+        for _ in 0..32 {
+            if inb(KB_STATUS) & 0x01 == 0 {
+                break;
+            }
+            let sc = inb(KB_DATA);
+            process_scancode(sc);
+        }
+    }
+}
+
 fn process_scancode(sc: u8) {
     let released = sc & SC_BREAK != 0;
     let sc_clean = sc & !SC_BREAK;
@@ -265,19 +279,21 @@ pub fn read_char() -> Option<u8> {
     KB_BUF.lock().pop()
 }
 
-/// Race-free blocking read: holds IF=0 across the check-and-sleep transition
-/// so a keyboard IRQ cannot arrive after the buffer check but before the
-/// process is marked Sleeping (which would leave it asleep with data pending).
+/// Blocking read that works with IRQ-driven input and polling fallback.
 pub fn wait_key() -> u8 {
-    use crate::arch::x86_64::io::{cli, sti, RFLAGS_IF};
+    use crate::arch::x86_64::io::{cli, hlt, sti, RFLAGS_IF};
     loop {
         let rflags = unsafe { cli() };
+        poll();
         if let Some(c) = read_char() {
             if rflags & RFLAGS_IF != 0 {
                 sti();
             }
             return c;
         }
-        crate::proc::scheduler::sleep_current();
+        if rflags & RFLAGS_IF != 0 {
+            sti();
+        }
+        hlt();
     }
 }
