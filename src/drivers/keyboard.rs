@@ -4,24 +4,38 @@ use crate::sync::spinlock::SpinLock;
 
 const KB_DATA: u16 = 0x60;
 const KB_STATUS: u16 = 0x64;
+const I8042_WAIT_SPINS: usize = 100_000;
+const I8042_CMD_READ_CCB: u8 = 0x20;
+const I8042_CMD_WRITE_CCB: u8 = 0x60;
+const I8042_CMD_ENABLE_PORT1: u8 = 0xAE;
+const KB_CMD_ENABLE_SCANNING: u8 = 0xF4;
+const KB_ACK: u8 = 0xFA;
 
 /// Wait until the i8042 input buffer is empty (bit 1 of status port).
 /// Must be called before writing a command or data byte to the controller.
-fn i8042_wait_write() {
+fn i8042_wait_write() -> bool {
     unsafe {
-        while inb(KB_STATUS) & 0x02 != 0 {
+        for _ in 0..I8042_WAIT_SPINS {
+            if inb(KB_STATUS) & 0x02 == 0 {
+                return true;
+            }
             core::hint::spin_loop();
         }
     }
+    false
 }
 
 /// Wait until the i8042 output buffer has data ready (bit 0 of status port).
-fn i8042_wait_read() {
+fn i8042_wait_read() -> bool {
     unsafe {
-        while inb(KB_STATUS) & 0x01 == 0 {
+        for _ in 0..I8042_WAIT_SPINS {
+            if inb(KB_STATUS) & 0x01 != 0 {
+                return true;
+            }
             core::hint::spin_loop();
         }
     }
+    false
 }
 
 /// Initialize the i8042 PS/2 controller:
@@ -29,30 +43,62 @@ fn i8042_wait_read() {
 /// - Read the Controller Configuration Byte (CCB)
 /// - Set bit 0 (Keyboard Interrupt Enable) so IRQ1 fires on keypress
 /// - Write the CCB back
+/// - Enable first PS/2 port and keyboard scanning
 pub fn init() {
     unsafe {
-        // Flush any stale bytes from the i8042 output buffer.
-        while inb(KB_STATUS) & 0x01 != 0 {
+        // Flush stale bytes from i8042 output buffer (bounded).
+        for _ in 0..32 {
+            if inb(KB_STATUS) & 0x01 == 0 {
+                break;
+            }
             let _ = inb(KB_DATA);
         }
 
         // Command 0x20 = "Read CCB"; result arrives at port 0x60.
-        i8042_wait_write();
-        outb(KB_STATUS, 0x20);
-        i8042_wait_read();
+        if !i8042_wait_write() {
+            log::warn!("[KB] i8042 wait_write timeout before READ_CCB");
+            return;
+        }
+        outb(KB_STATUS, I8042_CMD_READ_CCB);
+        if !i8042_wait_read() {
+            log::warn!("[KB] i8042 wait_read timeout for CCB");
+            return;
+        }
+
         let ccb = inb(KB_DATA);
         crate::serial_println!("[KB] i8042 CCB = {:#04x}", ccb);
 
         // Bit 0 = Keyboard Interrupt Enable (KIE).
-        // Bit 4 = Keyboard Clock Disable — clear it so the keyboard is enabled.
+        // Bit 4 = Keyboard Clock Disable; clear it so keyboard clock is enabled.
         let new_ccb = (ccb | 0x01) & !0x10;
 
         // Command 0x60 = "Write CCB"; follow with the new byte on port 0x60.
-        i8042_wait_write();
-        outb(KB_STATUS, 0x60);
-        i8042_wait_write();
+        if !i8042_wait_write() {
+            log::warn!("[KB] i8042 wait_write timeout before WRITE_CCB");
+            return;
+        }
+        outb(KB_STATUS, I8042_CMD_WRITE_CCB);
+        if !i8042_wait_write() {
+            log::warn!("[KB] i8042 wait_write timeout before CCB data");
+            return;
+        }
+
         outb(KB_DATA, new_ccb);
-        crate::serial_println!("[KB] i8042 CCB → {:#04x} (KIE=1)", new_ccb);
+        crate::serial_println!("[KB] i8042 CCB -> {:#04x} (KIE=1)", new_ccb);
+
+        // Explicitly enable PS/2 first port and keyboard scanning.
+        if i8042_wait_write() {
+            outb(KB_STATUS, I8042_CMD_ENABLE_PORT1);
+        }
+        if i8042_wait_write() {
+            outb(KB_DATA, KB_CMD_ENABLE_SCANNING);
+            if i8042_wait_read() {
+                let ack = inb(KB_DATA);
+                if ack != KB_ACK {
+                    log::debug!("[KB] keyboard enable-scan reply = {:#04x}", ack);
+                }
+            }
+        }
     }
 }
 
