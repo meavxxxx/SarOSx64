@@ -71,13 +71,13 @@ pub extern "C" fn syscall_dispatch(
         SYS_EXIT | SYS_EXIT_GROUP => {
             if let Some(arc) = crate::proc::current_process() {
                 let mut p = arc.lock();
-                p.state = crate::proc::ProcessState::Dead;
+                p.state = crate::proc::ProcessState::Zombie;
                 p.exit_code = a0 as i32;
             }
-            crate::proc::schedule();
-            // schedule() returns only when no other runnable process exists;
-            // halt until the next interrupt (timer/keyboard) triggers a reschedule.
+            // Never continue normal execution after exit: keep yielding until
+            // another runnable task takes over.
             loop {
+                crate::proc::schedule();
                 crate::arch::x86_64::io::hlt();
             }
         }
