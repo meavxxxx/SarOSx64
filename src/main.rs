@@ -86,6 +86,11 @@ pub extern "C" fn kernel_main() -> ! {
 
     arch::x86_64::timer::calibrate_tsc();
 
+    let idle = proc::Process::new_kernel("idle", idle_task, u8::MAX);
+    if let Some(p) = idle {
+        proc::scheduler::spawn(p);
+    }
+
     let sh = proc::Process::new_kernel("shell", shell_task, 5);
     if let Some(p) = sh {
         proc::scheduler::spawn(p);
@@ -93,6 +98,12 @@ pub extern "C" fn kernel_main() -> ! {
 
     proc::scheduler::schedule();
 
+    loop {
+        arch::x86_64::io::hlt();
+    }
+}
+
+fn idle_task() -> ! {
     loop {
         arch::x86_64::io::hlt();
     }
