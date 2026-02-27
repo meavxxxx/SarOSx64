@@ -9,7 +9,6 @@ fn read_char_blocking() -> u8 {
             if rflags & RFLAGS_IF != 0 {
                 sti();
             }
-            crate::serial_println!("[KB] got char={:#04x}", c);
             return c;
         }
         if rflags & RFLAGS_IF != 0 {
