@@ -267,17 +267,6 @@ pub fn cmd_ln(args: &[String]) {
     });
 }
 
-fn wait_foreground(pid: u32) {
-    loop {
-        match crate::proc::process_state(pid) {
-            None
-            | Some(crate::proc::ProcessState::Dead)
-            | Some(crate::proc::ProcessState::Zombie) => break,
-            _ => crate::proc::scheduler::schedule(),
-        }
-    }
-}
-
 fn resolve_external_path(cmd: &str) -> Option<String> {
     with_vfs(|vfs| {
         if cmd.contains('/') {
@@ -365,7 +354,6 @@ pub fn cmd_run(args: &[String]) {
             let pid = proc.lock().pid;
             crate::proc::spawn(proc);
             shell_println!("Spawned '{}' as pid {}", path, pid);
-            wait_foreground(pid);
         }
         Err(e) => shell_println!("run: {}: {}", path, e),
     }
