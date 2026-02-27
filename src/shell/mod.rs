@@ -78,6 +78,7 @@ impl Shell {
             "jobs" => builtins::cmd_jobs(),
             "wait" => builtins::cmd_wait(rest),
             "fg" => builtins::cmd_fg(rest),
+            "kill" => builtins::cmd_kill(rest),
             "mount" => builtins::cmd_mount(rest),
             "umount" => builtins::cmd_umount(rest),
             "drives" => builtins::cmd_drives(),

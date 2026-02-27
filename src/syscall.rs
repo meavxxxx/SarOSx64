@@ -44,6 +44,81 @@ pub mod errno {
 use crate::arch::x86_64::idt::InterruptFrame;
 use errno::*;
 
+fn exit_current(exit_code: i32) -> ! {
+    let mut parent_pid = 0;
+    if let Some(arc) = crate::proc::current_process() {
+        let mut p = arc.lock();
+        parent_pid = p.ppid;
+        p.state = crate::proc::ProcessState::Zombie;
+        p.exit_code = exit_code;
+    }
+    if parent_pid != 0 {
+        crate::proc::scheduler::wake_up(parent_pid);
+    }
+    // Never continue normal execution after exit: keep yielding until
+    // another runnable task takes over.
+    loop {
+        crate::proc::schedule();
+        crate::arch::x86_64::io::hlt();
+    }
+}
+
+fn sys_kill(pid: i32, sig: i32) -> i64 {
+    // Minimal signal support for process control from shell/userland.
+    // Supported: SIGTERM(15), SIGKILL(9), pid > 0 only.
+    if pid <= 0 || (sig != 9 && sig != 15) {
+        return -EINVAL;
+    }
+
+    let current_pid = match crate::proc::current_process() {
+        Some(p) => p.lock().pid,
+        None => return -ESRCH,
+    };
+
+    if pid as u32 == current_pid {
+        exit_current(128 + sig);
+    }
+
+    let mut parent_pid = 0u32;
+    let mut found = false;
+    {
+        let rq = crate::proc::scheduler::RUN_QUEUE.lock();
+        for proc in &rq.queue {
+            let mut p = proc.lock();
+            if p.pid != pid as u32 {
+                continue;
+            }
+            // Do not allow terminating kernel tasks from kill.
+            if p.ppid == 0 {
+                return -EPERM;
+            }
+            // Minimal ownership model: only parent can signal child.
+            if p.ppid != current_pid {
+                return -EPERM;
+            }
+            if matches!(
+                p.state,
+                crate::proc::ProcessState::Zombie | crate::proc::ProcessState::Dead
+            ) {
+                return -ESRCH;
+            }
+            p.state = crate::proc::ProcessState::Zombie;
+            p.exit_code = 128 + sig;
+            parent_pid = p.ppid;
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        return -ESRCH;
+    }
+    if parent_pid != 0 {
+        crate::proc::scheduler::wake_up(parent_pid);
+    }
+    0
+}
+
 #[no_mangle]
 pub extern "C" fn syscall_dispatch(
     nr: u64,
@@ -68,26 +143,9 @@ pub extern "C" fn syscall_dispatch(
         }
         SYS_FORK | SYS_VFORK => crate::proc::fork::sys_fork_simple(),
         SYS_EXECVE => crate::proc::exec::sys_execve_simple(a0, a1, a2),
-        SYS_EXIT | SYS_EXIT_GROUP => {
-            let mut parent_pid = 0;
-            if let Some(arc) = crate::proc::current_process() {
-                let mut p = arc.lock();
-                parent_pid = p.ppid;
-                p.state = crate::proc::ProcessState::Zombie;
-                p.exit_code = a0 as i32;
-            }
-            if parent_pid != 0 {
-                crate::proc::scheduler::wake_up(parent_pid);
-            }
-            // Never continue normal execution after exit: keep yielding until
-            // another runnable task takes over.
-            loop {
-                crate::proc::schedule();
-                crate::arch::x86_64::io::hlt();
-            }
-        }
+        SYS_EXIT | SYS_EXIT_GROUP => exit_current(a0 as i32),
         SYS_WAIT4 => crate::proc::fork::sys_waitpid(a0 as i32, a1, a2 as u32),
-        SYS_KILL => 0,
+        SYS_KILL => sys_kill(a0 as i32, a1 as i32),
         SYS_GETPID => crate::proc::current_process()
             .map(|p| p.lock().pid as i64)
             .unwrap_or(1),

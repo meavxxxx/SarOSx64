@@ -24,6 +24,7 @@ pub fn cmd_help() {
     shell_println!("  jobs               list child processes");
     shell_println!("  wait [pid]         wait for child/children");
     shell_println!("  fg <pid>           wait for a background process");
+    shell_println!("  kill [-9|-15] <pid> terminate child process");
     shell_println!("  mount [n /path]    mount drive n at /path (no args: list mounts)");
     shell_println!("  umount <path>      unmount filesystem");
     shell_println!("  drives             list detected disk drives");
@@ -430,15 +431,28 @@ pub fn cmd_wait(args: &[String]) {
         return;
     }
 
-    let pid = if args.is_empty() {
-        -1
-    } else {
-        match args[0].parse::<i32>() {
-            Ok(p) if p > 0 => p,
-            _ => {
-                shell_println!("wait: invalid pid '{}'", args[0]);
-                return;
+    if args.is_empty() {
+        loop {
+            let waited = crate::proc::fork::sys_waitpid(-1, 0, 0);
+            if waited > 0 {
+                continue;
             }
+            if waited == -crate::syscall::errno::ECHILD {
+                break;
+            }
+            if waited < 0 {
+                shell_println!("wait: error {}", waited);
+            }
+            break;
+        }
+        return;
+    }
+
+    let pid = match args[0].parse::<i32>() {
+        Ok(p) if p > 0 => p,
+        _ => {
+            shell_println!("wait: invalid pid '{}'", args[0]);
+            return;
         }
     };
 
@@ -463,6 +477,48 @@ pub fn cmd_fg(args: &[String]) {
     let waited = crate::proc::fork::sys_waitpid(pid, 0, 0);
     if waited < 0 {
         shell_println!("fg: error {}", waited);
+    }
+}
+
+pub fn cmd_kill(args: &[String]) {
+    if args.is_empty() || args.len() > 2 {
+        shell_println!("kill: usage: kill [-9|-15] <pid>");
+        return;
+    }
+
+    let (sig, pid_arg) = if args.len() == 1 {
+        (15, args[0].as_str())
+    } else {
+        let sig = match args[0].as_str() {
+            "-9" => 9,
+            "-15" => 15,
+            _ => {
+                shell_println!("kill: unsupported signal '{}'", args[0]);
+                return;
+            }
+        };
+        (sig, args[1].as_str())
+    };
+
+    let pid = match pid_arg.parse::<i32>() {
+        Ok(p) if p > 0 => p,
+        _ => {
+            shell_println!("kill: invalid pid '{}'", pid_arg);
+            return;
+        }
+    };
+
+    let rc = crate::syscall::syscall_dispatch(
+        crate::syscall::nr::SYS_KILL,
+        pid as u64,
+        sig as u64,
+        0,
+        0,
+        0,
+        0,
+    );
+    if rc < 0 {
+        shell_println!("kill: error {}", rc);
     }
 }
 
