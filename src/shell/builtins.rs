@@ -267,6 +267,64 @@ pub fn cmd_ln(args: &[String]) {
     });
 }
 
+fn wait_foreground(pid: u32) {
+    loop {
+        match crate::proc::process_state(pid) {
+            None
+            | Some(crate::proc::ProcessState::Dead)
+            | Some(crate::proc::ProcessState::Zombie) => break,
+            _ => crate::proc::scheduler::schedule(),
+        }
+    }
+}
+
+fn resolve_external_path(cmd: &str) -> Option<String> {
+    with_vfs(|vfs| {
+        if cmd.contains('/') {
+            if matches!(vfs.stat(cmd), Ok(stat) if stat.kind == FileType::Regular) {
+                return Some(cmd.to_string());
+            }
+            return None;
+        }
+
+        let cwd_candidate = if vfs.cwd_path == "/" {
+            alloc::format!("/{}", cmd)
+        } else {
+            alloc::format!("{}/{}", vfs.cwd_path, cmd)
+        };
+        if matches!(vfs.stat(&cwd_candidate), Ok(stat) if stat.kind == FileType::Regular) {
+            return Some(cwd_candidate);
+        }
+
+        let bin_candidate = alloc::format!("/bin/{}", cmd);
+        if matches!(vfs.stat(&bin_candidate), Ok(stat) if stat.kind == FileType::Regular) {
+            return Some(bin_candidate);
+        }
+
+        None
+    })
+}
+
+pub fn try_run_external(args: &[String]) -> bool {
+    if args.is_empty() {
+        return false;
+    }
+
+    let path = match resolve_external_path(args[0].as_str()) {
+        Some(p) => p,
+        None => return false,
+    };
+
+    let mut run_args = Vec::with_capacity(args.len());
+    run_args.push(path);
+    for arg in &args[1..] {
+        run_args.push(arg.clone());
+    }
+
+    cmd_run(&run_args);
+    true
+}
+
 pub fn cmd_run(args: &[String]) {
     if args.is_empty() {
         shell_println!("run: usage: run <path> [args...]");
@@ -307,6 +365,7 @@ pub fn cmd_run(args: &[String]) {
             let pid = proc.lock().pid;
             crate::proc::spawn(proc);
             shell_println!("Spawned '{}' as pid {}", path, pid);
+            wait_foreground(pid);
         }
         Err(e) => shell_println!("run: {}: {}", path, e),
     }

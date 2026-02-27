@@ -106,7 +106,11 @@ impl Shell {
                     crate::arch::x86_64::io::hlt();
                 }
             }
-            _ => shell_println!("{}: command not found", cmd),
+            _ => {
+                if !builtins::try_run_external(args) {
+                    shell_println!("{}: command not found", cmd);
+                }
+            }
         }
     }
 }
