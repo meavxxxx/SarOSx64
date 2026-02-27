@@ -25,12 +25,17 @@ fn i8042_wait_read() {
 }
 
 /// Initialize the i8042 PS/2 controller:
-/// - Flush the output buffer
-/// - Read the Controller Configuration Byte (CCB)
-/// - Set bit 0 (Keyboard Interrupt Enable) so IRQ1 fires on keypress
-/// - Write the CCB back
+/// 1. Disable keyboard port (0xAD) to stop clock during init
+/// 2. Flush output buffer
+/// 3. Read CCB, set KIE=1, clear clock-disable bit, write back
+/// 4. Re-enable keyboard port (0xAE)
+/// 5. Flush again to discard any startup bytes from the keyboard device
 pub fn init() {
     unsafe {
+        // Disable first PS/2 port so keystrokes don't arrive during init.
+        i8042_wait_write();
+        outb(KB_STATUS, 0xAD);
+
         // Flush any stale bytes from the i8042 output buffer.
         while inb(KB_STATUS) & 0x01 != 0 {
             let _ = inb(KB_DATA);
@@ -53,6 +58,17 @@ pub fn init() {
         i8042_wait_write();
         outb(KB_DATA, new_ccb);
         crate::serial_println!("[KB] i8042 CCB → {:#04x} (KIE=1)", new_ccb);
+
+        // Re-enable first PS/2 port — this is the critical step that lets the
+        // keyboard generate IRQ1 for keystrokes.
+        i8042_wait_write();
+        outb(KB_STATUS, 0xAE);
+
+        // Flush any startup/init bytes the keyboard device may have sent
+        // (e.g. power-on self-test result 0xAA) to prevent spurious IRQs.
+        while inb(KB_STATUS) & 0x01 != 0 {
+            let _ = inb(KB_DATA);
+        }
     }
 }
 
