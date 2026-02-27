@@ -370,9 +370,19 @@ pub fn cmd_run(args: &[String]) {
             if background {
                 shell_println!("Spawned '{}' as pid {}", path, pid);
             } else {
-                let waited = crate::proc::fork::sys_waitpid(pid as i32, 0, 0);
+                let mut status = 0u32;
+                let waited = crate::proc::fork::sys_waitpid(
+                    pid as i32,
+                    (&mut status as *mut u32) as u64,
+                    0,
+                );
                 if waited < 0 {
                     shell_println!("run: waitpid({}) failed: {}", pid, waited);
+                } else {
+                    let code = (status >> 8) & 0xFF;
+                    if code != 0 {
+                        shell_println!("run: pid {} exited with status {}", pid, code);
+                    }
                 }
             }
         }
@@ -383,9 +393,19 @@ pub fn cmd_run(args: &[String]) {
 pub fn reap_exited_children_nonblocking() {
     const WNOHANG: u32 = 1;
     loop {
-        let pid = crate::proc::fork::sys_waitpid(-1, 0, WNOHANG);
+        let mut status = 0u32;
+        let pid = crate::proc::fork::sys_waitpid(
+            -1,
+            (&mut status as *mut u32) as u64,
+            WNOHANG,
+        );
         if pid > 0 {
-            shell_println!("[{}] done", pid);
+            let code = (status >> 8) & 0xFF;
+            if code == 0 {
+                shell_println!("[{}] done", pid);
+            } else {
+                shell_println!("[{}] done (status {})", pid, code);
+            }
             continue;
         }
         break;
