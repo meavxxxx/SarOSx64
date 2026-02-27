@@ -298,12 +298,19 @@ pub fn tick() {
         }
     };
     if preempt {
-        schedule();
+        schedule_from_irq();
     }
 }
 
 pub fn schedule() {
-    let in_irq = crate::arch::x86_64::idt::in_interrupt_context();
+    schedule_impl(false);
+}
+
+fn schedule_from_irq() {
+    schedule_impl(true);
+}
+
+fn schedule_impl(in_irq: bool) {
     let mut rq = RUN_QUEUE.lock();
     let old = rq.current.take();
     if let Some(ref p) = old {
@@ -449,7 +456,6 @@ pub unsafe extern "C" fn context_switch(old: *mut CpuContext, new: *const CpuCon
         "mov 40(%rsi),%rbx",
         "mov 48(%rsi),%rsp",
         "mov 64(%rsi),%rax",
-        "or $0x200,%rax",
         "push %rax",
         "popfq",
         "jmp *56(%rsi)",
@@ -470,7 +476,6 @@ unsafe extern "C" fn jump_to_context(ctx: *const CpuContext) {
         "mov 40(%rdi),%rbx",
         "mov 48(%rdi),%rsp",
         "mov 64(%rdi),%rax",
-        "or $0x200,%rax",
         "push %rax",
         "popfq",
         "jmp *56(%rdi)",

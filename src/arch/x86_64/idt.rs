@@ -1,5 +1,4 @@
 use core::arch::asm;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -89,7 +88,6 @@ impl Idt {
 }
 
 static mut IDT: Idt = Idt::new();
-static IRQ_NESTING: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
 #[repr(C)]
@@ -203,7 +201,6 @@ unsafe extern "C" fn isr_common() {
 #[no_mangle]
 extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
     let vector = frame.vector as u8;
-    IRQ_NESTING.fetch_add(1, Ordering::Relaxed);
 
     match vector {
         0 => exc_divide_error(frame),
@@ -233,8 +230,6 @@ extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
             log::warn!("Spurious interrupt vector={:#x}", vector);
         }
     }
-
-    IRQ_NESTING.fetch_sub(1, Ordering::Relaxed);
 }
 
 use crate::arch::x86_64::pic;
@@ -447,10 +442,6 @@ fn is_current_user_process() -> bool {
         }
         None => false,
     }
-}
-
-pub fn in_interrupt_context() -> bool {
-    IRQ_NESTING.load(Ordering::Relaxed) != 0
 }
 
 // (unused broken macro removed)
