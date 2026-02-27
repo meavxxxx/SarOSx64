@@ -1,4 +1,4 @@
-use crate::arch::x86_64::gdt::{current_tss, SEG_KERNEL_CODE, SEG_USER_DATA};
+use crate::arch::x86_64::gdt::{current_tss, SEG_KERNEL_CODE, SEG_USER_CODE, SEG_USER_DATA};
 use crate::arch::x86_64::io::{
     rdmsr, wrmsr, EFER_SCE, MSR_EFER, MSR_GS_BASE, MSR_KERNEL_GS, MSR_LSTAR, MSR_SFMASK, MSR_STAR,
 };
@@ -94,13 +94,21 @@ pub unsafe extern "C" fn syscall_entry() {
         "pop %rcx",
         "pop %r11",
 
-        "mov %gs:16, %rsp",
+        // Build an IRET frame explicitly and return with iretq instead of sysretq.
+        // This is more robust against sysret-specific #GP corner cases.
+        "mov %gs:16, %rdx",
+        "push ${user_ss}",
+        "push %rdx",
+        "push %r11",
+        "push ${user_cs}",
+        "push %rcx",
 
-        "cli",
         "swapgs",
-        "sysretq",
+        "iretq",
 
         handler = sym syscall_dispatch_entry,
+        user_cs = const SEG_USER_CODE,
+        user_ss = const SEG_USER_DATA,
         options(att_syntax)
     );
 }

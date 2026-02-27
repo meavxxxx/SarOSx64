@@ -311,6 +311,7 @@ fn schedule_from_irq() {
 }
 
 fn schedule_impl(in_irq: bool) {
+    let irq_flags = crate::arch::x86_64::io::cli();
     let mut rq = RUN_QUEUE.lock();
     let old = rq.current.take();
     if let Some(ref p) = old {
@@ -336,6 +337,9 @@ fn schedule_impl(in_irq: bool) {
 
     if let (Some(old_a), Some(new_a)) = (old, next_for_switch) {
         if Arc::ptr_eq(&old_a, &new_a) {
+            if !in_irq && (irq_flags & crate::arch::x86_64::io::RFLAGS_IF != 0) {
+                crate::arch::x86_64::io::sti();
+            }
             return;
         }
         unsafe {
@@ -372,6 +376,10 @@ fn schedule_impl(in_irq: bool) {
                 jump_to_context(ctx_ptr);
             }
         }
+    }
+
+    if !in_irq && (irq_flags & crate::arch::x86_64::io::RFLAGS_IF != 0) {
+        crate::arch::x86_64::io::sti();
     }
 }
 
