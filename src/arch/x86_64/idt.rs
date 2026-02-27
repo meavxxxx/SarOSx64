@@ -251,6 +251,7 @@ fn irq_dispatch(irq: u8, frame: &mut InterruptFrame) {
     match irq {
         0 => crate::arch::x86_64::timer::irq_timer(frame),
         1 => crate::drivers::keyboard::irq_keyboard(frame),
+        4 => crate::drivers::serial::irq_serial(frame),
         _ => log::debug!("Unhandled IRQ {}", irq),
     }
 }

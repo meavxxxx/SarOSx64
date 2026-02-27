@@ -40,7 +40,8 @@ pub fn init() {
         outb(PIC2_DATA, ICW4_8086);
         io_wait();
 
-        outb(PIC1_DATA, 0b1111_1100);
+        // IRQ0 = timer, IRQ1 = PS/2 keyboard, IRQ4 = COM1 serial RX
+        outb(PIC1_DATA, 0b1110_1100);
         outb(PIC2_DATA, 0b1111_1111);
     }
 }

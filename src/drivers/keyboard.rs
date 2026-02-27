@@ -235,6 +235,11 @@ pub fn read_char() -> Option<u8> {
     KB_BUF.lock().pop()
 }
 
+pub fn push_char(c: u8) {
+    KB_BUF.lock().push(c);
+    crate::proc::wake_up_all_sleeping();
+}
+
 /// Race-free blocking read: holds IF=0 across the check-and-sleep transition
 /// so a keyboard IRQ cannot arrive after the buffer check but before the
 /// process is marked Sleeping (which would leave it asleep with data pending).
