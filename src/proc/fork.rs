@@ -209,7 +209,7 @@ pub fn sys_fork(parent_frame: &crate::arch::x86_64::idt::InterruptFrame) -> i64 
 
         use crate::arch::x86_64::limine::phys_to_virt;
         use crate::mm::pmm::alloc_frames;
-        let kstack_phys = match alloc_frames(2) {
+        let kstack_phys = match alloc_frames(Process::KERNEL_STACK_SIZE / PAGE_SIZE) {
             Some(p) => p,
             None => return -crate::syscall::errno::ENOMEM,
         };
@@ -359,7 +359,7 @@ pub fn sys_fork_simple() -> i64 {
 
         use crate::arch::x86_64::limine::phys_to_virt;
         use crate::mm::pmm::alloc_frames;
-        let kstack_phys = match alloc_frames(2) {
+        let kstack_phys = match alloc_frames(Process::KERNEL_STACK_SIZE / PAGE_SIZE) {
             Some(p) => p,
             None => return -crate::syscall::errno::ENOMEM,
         };

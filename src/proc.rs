@@ -66,7 +66,7 @@ impl Process {
         use crate::arch::x86_64::limine::phys_to_virt;
         use crate::mm::pmm::alloc_frames;
         let pid = alloc_pid();
-        let stack_phys = alloc_frames(2)?;
+        let stack_phys = alloc_frames(Self::KERNEL_STACK_SIZE / crate::mm::pmm::PAGE_SIZE)?;
         let stack_virt = phys_to_virt(stack_phys);
         let stack_top = stack_virt + Self::KERNEL_STACK_SIZE as u64;
         let ctx = CpuContext {
@@ -115,7 +115,8 @@ impl Process {
         let pid = alloc_pid();
 
         // Kernel stack for this process
-        let kstack_phys = alloc_frames(2).ok_or("OOM: kernel stack")?;
+        let kstack_phys = alloc_frames(Self::KERNEL_STACK_SIZE / crate::mm::pmm::PAGE_SIZE)
+            .ok_or("OOM: kernel stack")?;
         let kstack_virt = phys_to_virt(kstack_phys);
         let kstack_top = kstack_virt + Self::KERNEL_STACK_SIZE as u64;
 
