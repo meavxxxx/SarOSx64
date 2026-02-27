@@ -106,11 +106,7 @@ pub fn load_elf(
     vm: &mut VmSpace,
     pie_base: u64,
 ) -> Result<LoadedElf, ElfError> {
-    if data.len() < core::mem::size_of::<Elf64Ehdr>() {
-        return Err(ElfError::TooSmall);
-    }
-
-    let ehdr: &Elf64Ehdr = unsafe { &*(data.as_ptr() as *const Elf64Ehdr) };
+    let ehdr = parse_ehdr(data)?;
 
     if &ehdr.e_ident[0..4] != &ELFMAG {
         return Err(ElfError::BadMagic);
@@ -143,9 +139,7 @@ pub fn load_elf(
         return Err(ElfError::OutOfBounds);
     }
 
-    let phdrs: &[Elf64Phdr] = unsafe {
-        core::slice::from_raw_parts(data.as_ptr().add(phoff) as *const Elf64Phdr, phnum)
-    };
+    let phdrs = parse_phdrs(data, phoff, phnum, phentsize)?;
 
     let is_pie = ehdr.e_type == ET_DYN;
     let slide = if is_pie { pie_base } else { 0 };
@@ -155,7 +149,7 @@ pub fn load_elf(
     let mut phdr_vaddr = 0u64;
     let mut interp_path: Option<Vec<u8>> = None;
 
-    for phdr in phdrs {
+    for phdr in phdrs.iter() {
         match phdr.p_type {
             PT_LOAD => {
                 if phdr.p_memsz == 0 {
@@ -208,7 +202,7 @@ pub fn load_elf(
     // For ET_DYN this is the chosen slide/base; for ET_EXEC keep 0 (AT_BASE).
     let load_base = if is_pie { pie_base } else { 0 };
 
-    for phdr in phdrs {
+    for phdr in phdrs.iter() {
         if phdr.p_type != PT_LOAD || phdr.p_memsz == 0 {
             continue;
         }
@@ -297,7 +291,7 @@ pub fn load_elf(
         let ph_bytes = (ehdr.e_phnum as u64)
             .checked_mul(ehdr.e_phentsize as u64)
             .ok_or(ElfError::BadPhdr)?;
-        for phdr in phdrs {
+        for phdr in phdrs.iter() {
             if phdr.p_type != PT_LOAD || phdr.p_filesz == 0 {
                 continue;
             }
@@ -346,15 +340,16 @@ pub fn load_elf(
 }
 
 pub fn is_valid_elf(data: &[u8]) -> bool {
-    if data.len() < core::mem::size_of::<Elf64Ehdr>() {
+    if data.len() < 20 {
         return false;
     }
-    let ehdr = unsafe { &*(data.as_ptr() as *const Elf64Ehdr) };
-    &ehdr.e_ident[0..4] == &ELFMAG
-        && ehdr.e_ident[4] == ELFCLASS64
-        && ehdr.e_ident[5] == ELFDATA2LSB
-        && (ehdr.e_type == ET_EXEC || ehdr.e_type == ET_DYN)
-        && ehdr.e_machine == EM_X86_64
+    let e_type = u16::from_le_bytes([data[16], data[17]]);
+    let e_machine = u16::from_le_bytes([data[18], data[19]]);
+    &data[0..4] == &ELFMAG
+        && data[4] == ELFCLASS64
+        && data[5] == ELFDATA2LSB
+        && (e_type == ET_EXEC || e_type == ET_DYN)
+        && e_machine == EM_X86_64
 }
 
 pub fn read_cstr(data: &[u8], offset: usize) -> &[u8] {
@@ -364,4 +359,35 @@ pub fn read_cstr(data: &[u8], offset: usize) -> &[u8] {
     let slice = &data[offset..];
     let end = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
     &slice[..end]
+}
+
+fn parse_ehdr(data: &[u8]) -> Result<Elf64Ehdr, ElfError> {
+    if data.len() < core::mem::size_of::<Elf64Ehdr>() {
+        return Err(ElfError::TooSmall);
+    }
+    Ok(unsafe { core::ptr::read_unaligned(data.as_ptr() as *const Elf64Ehdr) })
+}
+
+fn parse_phdrs(
+    data: &[u8],
+    phoff: usize,
+    phnum: usize,
+    phentsize: usize,
+) -> Result<Vec<Elf64Phdr>, ElfError> {
+    if phentsize != core::mem::size_of::<Elf64Phdr>() {
+        return Err(ElfError::BadPhdr);
+    }
+    let mut phdrs = Vec::with_capacity(phnum);
+    for i in 0..phnum {
+        let off = phoff
+            .checked_add(i.checked_mul(phentsize).ok_or(ElfError::BadPhdr)?)
+            .ok_or(ElfError::BadPhdr)?;
+        let end = off.checked_add(phentsize).ok_or(ElfError::BadPhdr)?;
+        if end > data.len() {
+            return Err(ElfError::OutOfBounds);
+        }
+        let phdr = unsafe { core::ptr::read_unaligned(data.as_ptr().add(off) as *const Elf64Phdr) };
+        phdrs.push(phdr);
+    }
+    Ok(phdrs)
 }

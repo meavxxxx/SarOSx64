@@ -151,14 +151,81 @@ pub extern "C" fn syscall_dispatch(
 }
 
 pub mod fs {
+    use alloc::vec::Vec;
+    use crate::arch::x86_64::limine::phys_to_virt;
+    use crate::mm::pmm::PAGE_SIZE;
     use super::errno::*;
+
+    fn copy_from_user(ptr: u64, count: usize) -> Option<Vec<u8>> {
+        let proc = crate::proc::current_process()?;
+        let mut out = Vec::with_capacity(count);
+        out.resize(count, 0);
+        let mut copied = 0usize;
+        while copied < count {
+            let vaddr = ptr.checked_add(copied as u64)?;
+            let phys = {
+                let p = proc.lock();
+                p.address_space.translate(vaddr)?
+            };
+            let page_remaining = PAGE_SIZE - (vaddr as usize % PAGE_SIZE);
+            let to_copy = (count - copied).min(page_remaining);
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    phys_to_virt(phys) as *const u8,
+                    out.as_mut_ptr().add(copied),
+                    to_copy,
+                );
+            }
+            copied += to_copy;
+        }
+        Some(out)
+    }
+
+    fn copy_to_user(ptr: u64, data: &[u8]) -> bool {
+        let proc = match crate::proc::current_process() {
+            Some(p) => p,
+            None => return false,
+        };
+        let mut copied = 0usize;
+        while copied < data.len() {
+            let vaddr = match ptr.checked_add(copied as u64) {
+                Some(v) => v,
+                None => return false,
+            };
+            let phys = {
+                let p = proc.lock();
+                match p.address_space.translate(vaddr) {
+                    Some(phys) => phys,
+                    None => return false,
+                }
+            };
+            let page_remaining = PAGE_SIZE - (vaddr as usize % PAGE_SIZE);
+            let to_copy = (data.len() - copied).min(page_remaining);
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    data.as_ptr().add(copied),
+                    phys_to_virt(phys) as *mut u8,
+                    to_copy,
+                );
+            }
+            copied += to_copy;
+        }
+        true
+    }
+
     pub fn sys_write(fd: i32, buf: *const u8, count: usize) -> i64 {
-        if buf.is_null() || count == 0 {
+        if count == 0 {
+            return 0;
+        }
+        if buf.is_null() {
             return -EFAULT;
         }
         if fd == 1 || fd == 2 {
-            let slice = unsafe { core::slice::from_raw_parts(buf, count) };
-            if let Ok(s) = core::str::from_utf8(slice) {
+            let slice = match copy_from_user(buf as u64, count) {
+                Some(v) => v,
+                None => return -EFAULT,
+            };
+            if let Ok(s) = core::str::from_utf8(&slice) {
                 crate::drivers::serial::write_str(s);
                 crate::drivers::vga::write_str(s);
             }
@@ -167,14 +234,17 @@ pub mod fs {
         -EBADF
     }
     pub fn sys_read(fd: i32, buf: *mut u8, count: usize) -> i64 {
-        if buf.is_null() || count == 0 {
+        if count == 0 {
+            return 0;
+        }
+        if buf.is_null() {
             return -EFAULT;
         }
         if fd == 0 {
             match crate::drivers::keyboard::read_char() {
                 Some(c) => {
-                    unsafe {
-                        *buf = c;
+                    if !copy_to_user(buf as u64, &[c]) {
+                        return -EFAULT;
                     }
                     1
                 }
