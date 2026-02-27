@@ -1,4 +1,5 @@
 use core::arch::asm;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -88,6 +89,7 @@ impl Idt {
 }
 
 static mut IDT: Idt = Idt::new();
+static IRQ_NESTING: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug)]
 #[repr(C)]
@@ -201,6 +203,7 @@ unsafe extern "C" fn isr_common() {
 #[no_mangle]
 extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
     let vector = frame.vector as u8;
+    IRQ_NESTING.fetch_add(1, Ordering::Relaxed);
 
     match vector {
         0 => exc_divide_error(frame),
@@ -230,6 +233,8 @@ extern "C" fn interrupt_dispatch(frame: &mut InterruptFrame) {
             log::warn!("Spurious interrupt vector={:#x}", vector);
         }
     }
+
+    IRQ_NESTING.fetch_sub(1, Ordering::Relaxed);
 }
 
 use crate::arch::x86_64::pic;
@@ -282,6 +287,12 @@ fn exc_bound_range(frame: &InterruptFrame) {
 fn exc_invalid_opcode(frame: &InterruptFrame) {
     if frame.cs & 3 == 3 {
         deliver_signal(frame, Signal::SIGILL, "Invalid Opcode");
+    } else if is_current_user_process() {
+        log::error!(
+            "#UD in kernel while running user process at RIP={:#018x}; terminating process",
+            frame.rip
+        );
+        crate::proc::terminate_current(128 + Signal::SIGILL as i32);
     } else {
         panic!("#UD Invalid Opcode in kernel at RIP={:#018x}", frame.rip);
     }
@@ -326,6 +337,13 @@ fn exc_stack_segment_fault(frame: &InterruptFrame) {
 fn exc_general_protection(frame: &InterruptFrame) {
     if frame.cs & 3 == 3 {
         deliver_signal(frame, Signal::SIGSEGV, "General Protection Fault");
+    } else if is_current_user_process() {
+        log::error!(
+            "#GP in kernel while running user process: err={:#x} RIP={:#018x}; terminating process",
+            frame.error_code,
+            frame.rip
+        );
+        crate::proc::terminate_current(128 + Signal::SIGSEGV as i32);
     } else {
         panic!(
             "#GP General Protection Fault error={:#x} at RIP={:#018x} CS={:#x}",
@@ -364,6 +382,14 @@ fn exc_page_fault(frame: &InterruptFrame) {
     if !handled {
         if user {
             deliver_signal(frame, Signal::SIGSEGV, "Page Fault");
+        } else if is_current_user_process() {
+            log::error!(
+                "#PF in kernel while running user process: addr={:#018x} err={:#x} RIP={:#018x}; terminating process",
+                cr2,
+                frame.error_code,
+                frame.rip
+            );
+            crate::proc::terminate_current(128 + Signal::SIGSEGV as i32);
         } else {
             panic!(
                 "#PF unhandled in kernel! addr={:#018x} err={:#x} RIP={:#018x}",
@@ -411,6 +437,20 @@ fn deliver_signal(frame: &InterruptFrame, sig: Signal, reason: &str) {
         frame.rip
     );
     crate::proc::terminate_current(128 + sig as i32);
+}
+
+fn is_current_user_process() -> bool {
+    match crate::proc::current_process() {
+        Some(p) => {
+            let proc = p.lock();
+            proc.ppid != 0
+        }
+        None => false,
+    }
+}
+
+pub fn in_interrupt_context() -> bool {
+    IRQ_NESTING.load(Ordering::Relaxed) != 0
 }
 
 // (unused broken macro removed)
@@ -461,15 +501,15 @@ pub fn init_tables() {
         }
 
         // Exceptions without error codes
-        ISR_NO_ERR_TABLE[0]  = naked_isr_no_err!(0);
-        ISR_NO_ERR_TABLE[1]  = naked_isr_no_err!(1);
-        ISR_NO_ERR_TABLE[2]  = naked_isr_no_err!(2);
-        ISR_NO_ERR_TABLE[3]  = naked_isr_no_err!(3);
-        ISR_NO_ERR_TABLE[4]  = naked_isr_no_err!(4);
-        ISR_NO_ERR_TABLE[5]  = naked_isr_no_err!(5);
-        ISR_NO_ERR_TABLE[6]  = naked_isr_no_err!(6);
-        ISR_NO_ERR_TABLE[7]  = naked_isr_no_err!(7);
-        ISR_NO_ERR_TABLE[9]  = naked_isr_no_err!(9);
+        ISR_NO_ERR_TABLE[0] = naked_isr_no_err!(0);
+        ISR_NO_ERR_TABLE[1] = naked_isr_no_err!(1);
+        ISR_NO_ERR_TABLE[2] = naked_isr_no_err!(2);
+        ISR_NO_ERR_TABLE[3] = naked_isr_no_err!(3);
+        ISR_NO_ERR_TABLE[4] = naked_isr_no_err!(4);
+        ISR_NO_ERR_TABLE[5] = naked_isr_no_err!(5);
+        ISR_NO_ERR_TABLE[6] = naked_isr_no_err!(6);
+        ISR_NO_ERR_TABLE[7] = naked_isr_no_err!(7);
+        ISR_NO_ERR_TABLE[9] = naked_isr_no_err!(9);
         ISR_NO_ERR_TABLE[16] = naked_isr_no_err!(16);
         ISR_NO_ERR_TABLE[18] = naked_isr_no_err!(18);
         ISR_NO_ERR_TABLE[19] = naked_isr_no_err!(19);
@@ -477,7 +517,7 @@ pub fn init_tables() {
         ISR_NO_ERR_TABLE[21] = naked_isr_no_err!(21);
 
         // Exceptions with error codes
-        ISR_ERR_TABLE[8]  = naked_isr_err!(8);
+        ISR_ERR_TABLE[8] = naked_isr_err!(8);
         ISR_ERR_TABLE[10] = naked_isr_err!(10);
         ISR_ERR_TABLE[11] = naked_isr_err!(11);
         ISR_ERR_TABLE[12] = naked_isr_err!(12);

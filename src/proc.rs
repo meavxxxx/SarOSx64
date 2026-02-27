@@ -159,11 +159,11 @@ impl Process {
         //   [RIP] [CS] [RFLAGS] [RSP] [SS]
         let frame = unsafe {
             let p = (kstack_top as *mut u64).sub(5);
-            p.add(0).write(loaded.entry);                    // RIP
-            p.add(1).write(SEG_USER_CODE as u64);            // CS
-            p.add(2).write(0x0202u64);                       // RFLAGS (IF=1)
-            p.add(3).write(ustack.initial_rsp);              // RSP
-            p.add(4).write(SEG_USER_DATA as u64);            // SS
+            p.add(0).write(loaded.entry); // RIP
+            p.add(1).write(SEG_USER_CODE as u64); // CS
+            p.add(2).write(0x0202u64); // RFLAGS (IF=1)
+            p.add(3).write(ustack.initial_rsp); // RSP
+            p.add(4).write(SEG_USER_DATA as u64); // SS
             p as u64
         };
 
@@ -303,6 +303,7 @@ pub fn tick() {
 }
 
 pub fn schedule() {
+    let in_irq = crate::arch::x86_64::idt::in_interrupt_context();
     let mut rq = RUN_QUEUE.lock();
     let old = rq.current.take();
     if let Some(ref p) = old {
@@ -343,7 +344,11 @@ pub fn schedule() {
             }
             let oc = &mut old_a.lock().context as *mut CpuContext;
             let nc = &new_a.lock().context as *const CpuContext;
-            context_switch(oc, nc);
+            if in_irq {
+                context_switch_irq(oc, nc);
+            } else {
+                context_switch(oc, nc);
+            }
         }
     } else if let Some(a) = next {
         unsafe {
@@ -354,7 +359,11 @@ pub fn schedule() {
                 let g = a.lock();
                 &g.context as *const CpuContext
             }; // lock released here; pointer stays valid (Arc keeps data alive)
-            jump_to_context(ctx_ptr);
+            if in_irq {
+                jump_to_context_irq(ctx_ptr);
+            } else {
+                jump_to_context(ctx_ptr);
+            }
         }
     }
 }
@@ -464,6 +473,50 @@ unsafe extern "C" fn jump_to_context(ctx: *const CpuContext) {
         "or $0x200,%rax",
         "push %rax",
         "popfq",
+        "jmp *56(%rdi)",
+        options(att_syntax)
+    );
+}
+
+#[unsafe(naked)]
+pub unsafe extern "C" fn context_switch_irq(old: *mut CpuContext, new: *const CpuContext) {
+    core::arch::naked_asm!(
+        "mov %rbx,40(%rdi)",
+        "mov %rbp,32(%rdi)",
+        "mov %r12,24(%rdi)",
+        "mov %r13,16(%rdi)",
+        "mov %r14, 8(%rdi)",
+        "mov %r15, 0(%rdi)",
+        "mov %rsp,48(%rdi)",
+        "lea 1f(%rip),%rax",
+        "mov %rax,56(%rdi)",
+        "pushfq",
+        "pop %rax",
+        "mov %rax,64(%rdi)",
+        "mov  0(%rsi),%r15",
+        "mov  8(%rsi),%r14",
+        "mov 16(%rsi),%r13",
+        "mov 24(%rsi),%r12",
+        "mov 32(%rsi),%rbp",
+        "mov 40(%rsi),%rbx",
+        "mov 48(%rsi),%rsp",
+        "jmp *56(%rsi)",
+        "1:",
+        "ret",
+        options(att_syntax)
+    );
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn jump_to_context_irq(ctx: *const CpuContext) {
+    core::arch::naked_asm!(
+        "mov  0(%rdi),%r15",
+        "mov  8(%rdi),%r14",
+        "mov 16(%rdi),%r13",
+        "mov 24(%rdi),%r12",
+        "mov 32(%rdi),%rbp",
+        "mov 40(%rdi),%rbx",
+        "mov 48(%rdi),%rsp",
         "jmp *56(%rdi)",
         options(att_syntax)
     );

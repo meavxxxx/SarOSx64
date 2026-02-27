@@ -79,8 +79,6 @@ pub unsafe extern "C" fn syscall_entry() {
         "mov %rdi, %rsi",           // a0 = rdi
         "mov %rax, %rdi",           // nr = rax  (syscall number)
 
-        "sti",
-
         "call {handler}",
 
         "add $8, %rsp",             // discard a5 stack slot
