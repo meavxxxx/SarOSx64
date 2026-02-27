@@ -292,7 +292,11 @@ pub fn tick() {
             if p.time_slice > 0 {
                 p.time_slice -= 1;
             }
-            p.time_slice == 0
+            // IRQ-time preemption is currently safe only for kernel tasks.
+            // User tasks are switched cooperatively (sleep/exit/wait paths),
+            // otherwise timer IRQ can interrupt ring3 without saving full
+            // user return frame in Process::context.
+            p.time_slice == 0 && p.ppid == 0
         } else {
             false
         }
