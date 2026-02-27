@@ -1,5 +1,20 @@
 use core::mem;
 
+use crate::arch::x86_64::io::{wrmsr, MSR_KERNEL_GS};
+
+/// Per-CPU данные для syscall-пути (layout фиксирован — читается в asm)
+/// %gs:0  — зарезервировано
+/// %gs:8  — kernel_rsp: вершина стека ядра текущего процесса
+/// %gs:16 — user_rsp:   scratch-поле для сохранения RSP из userspace
+#[repr(C)]
+pub struct CpuLocal {
+    _pad:           u64,  // offset  0
+    pub kernel_rsp: u64,  // offset  8
+    pub user_rsp:   u64,  // offset 16
+}
+
+static mut CPU_LOCAL: CpuLocal = CpuLocal { _pad: 0, kernel_rsp: 0, user_rsp: 0 };
+
 pub const SEG_KERNEL_CODE: u16 = 0x08;
 pub const SEG_KERNEL_DATA: u16 = 0x10;
 pub const SEG_USER_DATA: u16 = 0x18 | 3;
@@ -169,6 +184,10 @@ static mut CPU_GDTS: [CpuGdt; 1] = [CpuGdt::new()];
 pub fn init_bsp(kernel_stack_top: u64) {
     unsafe {
         CPU_GDTS[0].set_kernel_stack(kernel_stack_top);
+        // Инициализируем KERNEL_GS_BASE для корректной работы swapgs в syscall_entry.
+        // syscall_entry использует %gs:8 как стек ядра и %gs:16 как scratch для user RSP.
+        CPU_LOCAL.kernel_rsp = kernel_stack_top;
+        wrmsr(MSR_KERNEL_GS, &CPU_LOCAL as *const CpuLocal as u64);
     }
 }
 
@@ -178,4 +197,8 @@ pub fn current_tss() -> &'static mut Tss {
 
 pub fn set_kernel_stack(rsp0: u64) {
     current_tss().rsp[0] = rsp0;
+    // Синхронизируем kernel_rsp в per-CPU данных (используется syscall_entry через %gs:8).
+    unsafe {
+        CPU_LOCAL.kernel_rsp = rsp0;
+    }
 }
