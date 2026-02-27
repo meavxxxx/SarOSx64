@@ -20,7 +20,7 @@ pub fn cmd_help() {
     shell_println!("  write <file> <text> write text to file");
     shell_println!("  stat <path>        show file info");
     shell_println!("  ln -s <target> <link> create symlink");
-    shell_println!("  run <file> [args]  execute ELF binary from VFS");
+    shell_println!("  run <file> [args...] [&] execute ELF binary from VFS");
     shell_println!("  mount [n /path]    mount drive n at /path (no args: list mounts)");
     shell_println!("  umount <path>      unmount filesystem");
     shell_println!("  drives             list detected disk drives");
@@ -319,7 +319,17 @@ pub fn cmd_run(args: &[String]) {
         shell_println!("run: usage: run <path> [args...]");
         return;
     }
-    let path = &args[0];
+    let mut run_args = args.to_vec();
+    let background = matches!(run_args.last(), Some(last) if last == "&");
+    if background {
+        run_args.pop();
+        if run_args.is_empty() {
+            shell_println!("run: usage: run <path> [args...]");
+            return;
+        }
+    }
+
+    let path = &run_args[0];
 
     let elf_data = match with_vfs(|vfs| vfs.read_file(path)) {
         Ok(d) => d,
@@ -334,7 +344,7 @@ pub fn cmd_run(args: &[String]) {
         return;
     }
 
-    let argv: alloc::vec::Vec<alloc::vec::Vec<u8>> = args
+    let argv: alloc::vec::Vec<alloc::vec::Vec<u8>> = run_args
         .iter()
         .map(|s| {
             let mut v = s.as_bytes().to_vec();
@@ -353,7 +363,14 @@ pub fn cmd_run(args: &[String]) {
         Ok(proc) => {
             let pid = proc.lock().pid;
             crate::proc::spawn(proc);
-            shell_println!("Spawned '{}' as pid {}", path, pid);
+            if background {
+                shell_println!("Spawned '{}' as pid {}", path, pid);
+            } else {
+                let waited = crate::proc::fork::sys_waitpid(pid as i32, 0, 0);
+                if waited < 0 {
+                    shell_println!("run: waitpid({}) failed: {}", pid, waited);
+                }
+            }
         }
         Err(e) => shell_println!("run: {}: {}", path, e),
     }

@@ -69,10 +69,15 @@ pub extern "C" fn syscall_dispatch(
         SYS_FORK | SYS_VFORK => crate::proc::fork::sys_fork_simple(),
         SYS_EXECVE => crate::proc::exec::sys_execve_simple(a0, a1, a2),
         SYS_EXIT | SYS_EXIT_GROUP => {
+            let mut parent_pid = 0;
             if let Some(arc) = crate::proc::current_process() {
                 let mut p = arc.lock();
+                parent_pid = p.ppid;
                 p.state = crate::proc::ProcessState::Zombie;
                 p.exit_code = a0 as i32;
+            }
+            if parent_pid != 0 {
+                crate::proc::scheduler::wake_up(parent_pid);
             }
             // Never continue normal execution after exit: keep yielding until
             // another runnable task takes over.

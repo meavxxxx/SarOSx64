@@ -113,6 +113,9 @@ impl Process {
         use crate::mm::pmm::alloc_frames;
 
         let pid = alloc_pid();
+        let ppid = crate::proc::scheduler::current_process()
+            .map(|p| p.lock().pid)
+            .unwrap_or(0);
 
         // Kernel stack for this process
         let kstack_phys = alloc_frames(Self::KERNEL_STACK_SIZE / crate::mm::pmm::PAGE_SIZE)
@@ -176,7 +179,7 @@ impl Process {
 
         Ok(Arc::new(SpinLock::new(Self {
             pid,
-            ppid: 0,
+            ppid,
             state: ProcessState::Runnable,
             context: ctx,
             address_space: space,
@@ -277,7 +280,8 @@ pub fn schedule() {
             proc.state = ProcessState::Runnable;
             proc.time_slice = proc.base_slice;
         }
-        let requeue = !matches!(proc.state, ProcessState::Dead | ProcessState::Zombie);
+        // Keep zombies in the global queue until a parent reaps them via waitpid.
+        let requeue = proc.state != ProcessState::Dead;
         drop(proc);
         if requeue {
             rq.queue.push(p.clone());

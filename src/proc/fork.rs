@@ -283,9 +283,17 @@ unsafe extern "C" fn fork_child_return() {
 
 pub fn sys_waitpid(pid: i32, wstatus_ptr: u64, options: u32) -> i64 {
     const WNOHANG: u32 = 1;
+    if pid < -1 {
+        return -crate::syscall::errno::EINVAL;
+    }
+
+    let parent_pid = match crate::proc::scheduler::current_process() {
+        Some(p) => p.lock().pid,
+        None => return -crate::syscall::errno::ECHILD,
+    };
 
     loop {
-        let found = find_zombie_child(pid);
+        let found = find_zombie_child(parent_pid, pid);
 
         if let Some((child_pid, exit_code)) = found {
             if wstatus_ptr != 0 {
@@ -304,6 +312,10 @@ pub fn sys_waitpid(pid: i32, wstatus_ptr: u64, options: u32) -> i64 {
             return child_pid as i64;
         }
 
+        if !has_matching_child(parent_pid, pid) {
+            return -crate::syscall::errno::ECHILD;
+        }
+
         if options & WNOHANG != 0 {
             return 0;
         }
@@ -312,17 +324,16 @@ pub fn sys_waitpid(pid: i32, wstatus_ptr: u64, options: u32) -> i64 {
     }
 }
 
-fn find_zombie_child(target_pid: i32) -> Option<(u32, i32)> {
+fn find_zombie_child(parent_pid: u32, target_pid: i32) -> Option<(u32, i32)> {
     use crate::proc::scheduler::RUN_QUEUE;
     let rq = RUN_QUEUE.lock();
-    let current_pid = rq.current.as_ref()?.lock().pid;
 
     for proc_arc in &rq.queue {
         let proc = proc_arc.lock();
-        if proc.ppid != current_pid {
+        if proc.ppid != parent_pid {
             continue;
         }
-        if target_pid != -1 && proc.pid != target_pid as u32 {
+        if !pid_matches(target_pid, proc.pid) {
             continue;
         }
         if proc.state == ProcessState::Zombie {
@@ -330,6 +341,20 @@ fn find_zombie_child(target_pid: i32) -> Option<(u32, i32)> {
         }
     }
     None
+}
+
+fn has_matching_child(parent_pid: u32, target_pid: i32) -> bool {
+    use crate::proc::scheduler::RUN_QUEUE;
+    let rq = RUN_QUEUE.lock();
+
+    rq.queue.iter().any(|proc_arc| {
+        let proc = proc_arc.lock();
+        proc.ppid == parent_pid && pid_matches(target_pid, proc.pid)
+    })
+}
+
+fn pid_matches(target_pid: i32, pid: u32) -> bool {
+    target_pid == -1 || pid == target_pid as u32
 }
 
 fn reap_zombie(pid: u32) {
