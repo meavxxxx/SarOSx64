@@ -253,6 +253,34 @@ pub fn process_state(pid: u32) -> Option<ProcessState> {
     None
 }
 
+#[derive(Clone, Copy)]
+pub struct ChildProcessInfo {
+    pub pid: u32,
+    pub state: ProcessState,
+    pub name: [u8; 32],
+}
+
+pub fn children_of_current() -> Vec<ChildProcessInfo> {
+    let rq = RUN_QUEUE.lock();
+    let parent_pid = match rq.current.as_ref() {
+        Some(cur) => cur.lock().pid,
+        None => return Vec::new(),
+    };
+
+    let mut children = Vec::new();
+    for proc in &rq.queue {
+        let p = proc.lock();
+        if p.ppid == parent_pid {
+            children.push(ChildProcessInfo {
+                pid: p.pid,
+                state: p.state,
+                name: p.name,
+            });
+        }
+    }
+    children
+}
+
 pub fn tick() {
     let preempt = {
         let mut rq = RUN_QUEUE.lock();

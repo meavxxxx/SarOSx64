@@ -21,6 +21,9 @@ pub fn cmd_help() {
     shell_println!("  stat <path>        show file info");
     shell_println!("  ln -s <target> <link> create symlink");
     shell_println!("  run <file> [args...] [&] execute ELF binary from VFS");
+    shell_println!("  jobs               list child processes");
+    shell_println!("  wait [pid]         wait for child/children");
+    shell_println!("  fg <pid>           wait for a background process");
     shell_println!("  mount [n /path]    mount drive n at /path (no args: list mounts)");
     shell_println!("  umount <path>      unmount filesystem");
     shell_println!("  drives             list detected disk drives");
@@ -373,6 +376,93 @@ pub fn cmd_run(args: &[String]) {
             }
         }
         Err(e) => shell_println!("run: {}: {}", path, e),
+    }
+}
+
+pub fn reap_exited_children_nonblocking() {
+    const WNOHANG: u32 = 1;
+    loop {
+        let pid = crate::proc::fork::sys_waitpid(-1, 0, WNOHANG);
+        if pid > 0 {
+            shell_println!("[{}] done", pid);
+            continue;
+        }
+        break;
+    }
+}
+
+fn proc_name(name: &[u8; 32]) -> &str {
+    let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+    core::str::from_utf8(&name[..end]).unwrap_or("?")
+}
+
+fn proc_state_name(state: crate::proc::ProcessState) -> &'static str {
+    match state {
+        crate::proc::ProcessState::Running => "running",
+        crate::proc::ProcessState::Runnable => "runnable",
+        crate::proc::ProcessState::Sleeping => "sleeping",
+        crate::proc::ProcessState::Zombie => "zombie",
+        crate::proc::ProcessState::Dead => "dead",
+    }
+}
+
+pub fn cmd_jobs() {
+    let mut children = crate::proc::children_of_current();
+    if children.is_empty() {
+        shell_println!("jobs: no child processes");
+        return;
+    }
+
+    children.sort_unstable_by_key(|c| c.pid);
+    for child in children {
+        shell_println!(
+            "{:>5}  {:<8}  {}",
+            child.pid,
+            proc_state_name(child.state),
+            proc_name(&child.name)
+        );
+    }
+}
+
+pub fn cmd_wait(args: &[String]) {
+    if args.len() > 1 {
+        shell_println!("wait: usage: wait [pid]");
+        return;
+    }
+
+    let pid = if args.is_empty() {
+        -1
+    } else {
+        match args[0].parse::<i32>() {
+            Ok(p) if p > 0 => p,
+            _ => {
+                shell_println!("wait: invalid pid '{}'", args[0]);
+                return;
+            }
+        }
+    };
+
+    let waited = crate::proc::fork::sys_waitpid(pid, 0, 0);
+    if waited < 0 {
+        shell_println!("wait: error {}", waited);
+    }
+}
+
+pub fn cmd_fg(args: &[String]) {
+    if args.len() != 1 {
+        shell_println!("fg: usage: fg <pid>");
+        return;
+    }
+    let pid = match args[0].parse::<i32>() {
+        Ok(p) if p > 0 => p,
+        _ => {
+            shell_println!("fg: invalid pid '{}'", args[0]);
+            return;
+        }
+    };
+    let waited = crate::proc::fork::sys_waitpid(pid, 0, 0);
+    if waited < 0 {
+        shell_println!("fg: error {}", waited);
     }
 }
 

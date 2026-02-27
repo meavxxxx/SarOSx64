@@ -26,6 +26,8 @@ impl Shell {
         });
 
         loop {
+            builtins::reap_exited_children_nonblocking();
+
             let prompt = with_vfs(|vfs| {
                 alloc::format!(
                     "\x1b[32mroot@saros\x1b[0m:\x1b[34m{}\x1b[0m# ",
@@ -72,8 +74,11 @@ impl Shell {
             "write" => builtins::cmd_write(rest),
             "stat" => builtins::cmd_stat(rest),
             "ln" => builtins::cmd_ln(rest),
-            "run"    => builtins::cmd_run(rest),
-            "mount"  => builtins::cmd_mount(rest),
+            "run" => builtins::cmd_run(rest),
+            "jobs" => builtins::cmd_jobs(),
+            "wait" => builtins::cmd_wait(rest),
+            "fg" => builtins::cmd_fg(rest),
+            "mount" => builtins::cmd_mount(rest),
             "umount" => builtins::cmd_umount(rest),
             "drives" => builtins::cmd_drives(),
             "lspci" => builtins::cmd_lspci(),
