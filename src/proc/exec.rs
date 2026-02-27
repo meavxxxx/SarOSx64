@@ -63,11 +63,13 @@ pub fn exec(
 
     let argv_refs: Vec<&[u8]> = argv.iter().map(|v| v.as_slice()).collect();
     let envp_refs: Vec<&[u8]> = envp.iter().map(|v| v.as_slice()).collect();
+    let at_base = interp_loaded.as_ref().map(|il| il.load_base).unwrap_or(0);
 
     let stack = build_user_stack(
         &mut new_space,
         &mut new_vm,
         &loaded,
+        at_base,
         &argv_refs,
         &envp_refs,
         path,

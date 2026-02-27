@@ -44,25 +44,6 @@ pub mod errno {
 use crate::arch::x86_64::idt::InterruptFrame;
 use errno::*;
 
-fn exit_current(exit_code: i32) -> ! {
-    let mut parent_pid = 0;
-    if let Some(arc) = crate::proc::current_process() {
-        let mut p = arc.lock();
-        parent_pid = p.ppid;
-        p.state = crate::proc::ProcessState::Zombie;
-        p.exit_code = exit_code;
-    }
-    if parent_pid != 0 {
-        crate::proc::scheduler::wake_up(parent_pid);
-    }
-    // Never continue normal execution after exit: keep yielding until
-    // another runnable task takes over.
-    loop {
-        crate::proc::schedule();
-        crate::arch::x86_64::io::hlt();
-    }
-}
-
 fn sys_kill(pid: i32, sig: i32) -> i64 {
     // Minimal signal support for process control from shell/userland.
     // Supported: SIGTERM(15), SIGKILL(9), pid > 0 only.
@@ -76,7 +57,7 @@ fn sys_kill(pid: i32, sig: i32) -> i64 {
     };
 
     if pid as u32 == current_pid {
-        exit_current(128 + sig);
+        crate::proc::terminate_current(128 + sig);
     }
 
     let mut parent_pid = 0u32;
@@ -143,7 +124,7 @@ pub extern "C" fn syscall_dispatch(
         }
         SYS_FORK | SYS_VFORK => crate::proc::fork::sys_fork_simple(),
         SYS_EXECVE => crate::proc::exec::sys_execve_simple(a0, a1, a2),
-        SYS_EXIT | SYS_EXIT_GROUP => exit_current(a0 as i32),
+        SYS_EXIT | SYS_EXIT_GROUP => crate::proc::terminate_current(a0 as i32),
         SYS_WAIT4 => crate::proc::fork::sys_waitpid(a0 as i32, a1, a2 as u32),
         SYS_KILL => sys_kill(a0 as i32, a1 as i32),
         SYS_GETPID => crate::proc::current_process()

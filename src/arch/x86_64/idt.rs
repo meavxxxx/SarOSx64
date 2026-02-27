@@ -410,7 +410,7 @@ fn deliver_signal(frame: &InterruptFrame, sig: Signal, reason: &str) {
         reason,
         frame.rip
     );
-    panic!("Unhandled user signal {:?} ({})", sig, reason);
+    crate::proc::terminate_current(128 + sig as i32);
 }
 
 // (unused broken macro removed)

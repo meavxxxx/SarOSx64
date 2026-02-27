@@ -96,6 +96,7 @@ pub fn build_user_stack(
     addr_space: &mut AddressSpace,
     vm: &mut VmSpace,
     loaded: &LoadedElf,
+    at_base: u64,
     argv: &[&[u8]],
     envp: &[&[u8]],
     execfn: &[u8],
@@ -175,7 +176,7 @@ pub fn build_user_stack(
     push!(0u64);
     push!(AT_FLAGS);
 
-    push!(loaded.load_base);
+    push!(at_base);
     push!(AT_BASE);
 
     push!(PAGE_SIZE as u64);

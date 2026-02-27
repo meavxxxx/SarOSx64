@@ -132,9 +132,11 @@ impl Process {
         } else {
             0
         };
-        let loaded =
-            crate::proc::elf::load_elf(elf_data, &mut space, &mut vm, pie_base)
-                .map_err(|_| "ELF load failed")?;
+        let loaded = crate::proc::elf::load_elf(elf_data, &mut space, &mut vm, pie_base)
+            .map_err(|_| "ELF load failed")?;
+        if loaded.interp_path.is_some() {
+            return Err("PT_INTERP unsupported in spawn path");
+        }
 
         // User stack with aux vectors
         let argv_refs: Vec<&[u8]> = argv.iter().map(|v| v.as_slice()).collect();
@@ -143,6 +145,7 @@ impl Process {
             &mut space,
             &mut vm,
             &loaded,
+            0,
             &argv_refs,
             &envp_refs,
             name.as_bytes(),
@@ -371,6 +374,28 @@ pub fn wake_up(pid: u32) {
             proc.state = ProcessState::Runnable;
             return;
         }
+    }
+}
+
+pub fn terminate_current(exit_code: i32) -> ! {
+    let mut parent_pid = 0;
+    if let Some(arc) = current_process() {
+        let mut p = arc.lock();
+        parent_pid = p.ppid;
+        p.state = ProcessState::Zombie;
+        p.exit_code = exit_code;
+    }
+    if parent_pid != 0 {
+        scheduler::wake_up(parent_pid);
+    }
+
+    loop {
+        schedule();
+        let rflags = crate::arch::x86_64::io::read_rflags();
+        if rflags & crate::arch::x86_64::io::RFLAGS_IF == 0 {
+            crate::arch::x86_64::io::sti();
+        }
+        crate::arch::x86_64::io::hlt();
     }
 }
 

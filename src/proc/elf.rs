@@ -121,7 +121,7 @@ pub fn load_elf(
     if ehdr.e_ident[5] != ELFDATA2LSB {
         return Err(ElfError::NotLittleEndian);
     }
-    if ehdr.e_ident[6] != 1 {
+    if ehdr.e_ident[6] != 1 || ehdr.e_version != 1 {
         return Err(ElfError::BadVersion);
     }
     if ehdr.e_type != ET_EXEC && ehdr.e_type != ET_DYN {
@@ -130,73 +130,94 @@ pub fn load_elf(
     if ehdr.e_machine != EM_X86_64 {
         return Err(ElfError::WrongArch);
     }
+    if ehdr.e_phentsize as usize != core::mem::size_of::<Elf64Phdr>() {
+        return Err(ElfError::BadPhdr);
+    }
 
-    let is_pie = ehdr.e_type == ET_DYN;
-    let slide = if is_pie { pie_base } else { 0 };
-
-    let phoff = ehdr.e_phoff as usize;
+    let phoff = usize::try_from(ehdr.e_phoff).map_err(|_| ElfError::OutOfBounds)?;
     let phnum = ehdr.e_phnum as usize;
     let phentsize = ehdr.e_phentsize as usize;
-
-    if phoff + phnum * phentsize > data.len() {
+    let ph_size = phnum.checked_mul(phentsize).ok_or(ElfError::BadPhdr)?;
+    let ph_end = phoff.checked_add(ph_size).ok_or(ElfError::BadPhdr)?;
+    if ph_end > data.len() {
         return Err(ElfError::OutOfBounds);
     }
 
-    let phdrs: &[Elf64Phdr] =
-        unsafe { core::slice::from_raw_parts(data.as_ptr().add(phoff) as *const Elf64Phdr, phnum) };
+    let phdrs: &[Elf64Phdr] = unsafe {
+        core::slice::from_raw_parts(data.as_ptr().add(phoff) as *const Elf64Phdr, phnum)
+    };
+
+    let is_pie = ehdr.e_type == ET_DYN;
+    let slide = if is_pie { pie_base } else { 0 };
 
     let mut load_min = u64::MAX;
     let mut load_max = 0u64;
     let mut phdr_vaddr = 0u64;
     let mut interp_path: Option<Vec<u8>> = None;
-    let mut stack_exec = false;
 
     for phdr in phdrs {
         match phdr.p_type {
             PT_LOAD => {
-                if phdr.p_vaddr < load_min {
-                    load_min = phdr.p_vaddr;
+                if phdr.p_memsz == 0 {
+                    continue;
                 }
-                let end = phdr.p_vaddr + phdr.p_memsz;
-                if end > load_max {
-                    load_max = end;
+                if phdr.p_filesz > phdr.p_memsz {
+                    return Err(ElfError::BadPhdr);
+                }
+                if phdr.p_align != 0 && (phdr.p_align & (phdr.p_align - 1)) != 0 {
+                    return Err(ElfError::BadPhdr);
+                }
+                if phdr.p_align > 1
+                    && (phdr.p_vaddr & (phdr.p_align - 1)) != (phdr.p_offset & (phdr.p_align - 1))
+                {
+                    return Err(ElfError::BadPhdr);
+                }
+
+                let end = phdr.p_vaddr.checked_add(phdr.p_memsz).ok_or(ElfError::BadPhdr)?;
+                load_min = load_min.min(phdr.p_vaddr);
+                load_max = load_max.max(end);
+
+                let off = usize::try_from(phdr.p_offset).map_err(|_| ElfError::OutOfBounds)?;
+                let filesz = usize::try_from(phdr.p_filesz).map_err(|_| ElfError::OutOfBounds)?;
+                let file_end = off.checked_add(filesz).ok_or(ElfError::OutOfBounds)?;
+                if file_end > data.len() {
+                    return Err(ElfError::OutOfBounds);
                 }
             }
             PT_PHDR => {
-                phdr_vaddr = phdr.p_vaddr + slide;
+                phdr_vaddr = phdr.p_vaddr.checked_add(slide).ok_or(ElfError::BadPhdr)?;
             }
             PT_INTERP => {
-                let off = phdr.p_offset as usize;
-                let sz = phdr.p_filesz as usize;
-                if off + sz > data.len() {
+                let off = usize::try_from(phdr.p_offset).map_err(|_| ElfError::OutOfBounds)?;
+                let sz = usize::try_from(phdr.p_filesz).map_err(|_| ElfError::OutOfBounds)?;
+                let end = off.checked_add(sz).ok_or(ElfError::OutOfBounds)?;
+                if end > data.len() || sz == 0 {
                     return Err(ElfError::OutOfBounds);
                 }
-                let path = data[off..off + sz].to_vec();
-                interp_path = Some(path);
+                interp_path = Some(data[off..end].to_vec());
             }
-            PT_GNU_STACK => {
-                stack_exec = phdr.p_flags & PF_X != 0;
-            }
+            PT_GNU_STACK | PT_GNU_RELRO | PT_DYNAMIC | PT_NOTE | PT_NULL | PT_TLS => {}
             _ => {}
         }
     }
 
-    let load_base = if is_pie { pie_base } else { load_min };
+    if load_min == u64::MAX {
+        return Err(ElfError::BadPhdr);
+    }
+
+    // For ET_DYN this is the chosen slide/base; for ET_EXEC keep 0 (AT_BASE).
+    let load_base = if is_pie { pie_base } else { 0 };
 
     for phdr in phdrs {
-        if phdr.p_type != PT_LOAD {
+        if phdr.p_type != PT_LOAD || phdr.p_memsz == 0 {
             continue;
         }
 
-        if phdr.p_memsz == 0 {
-            continue;
-        }
-
-        let seg_vaddr = phdr.p_vaddr + slide;
+        let seg_vaddr = phdr.p_vaddr.checked_add(slide).ok_or(ElfError::BadPhdr)?;
+        let seg_end = seg_vaddr.checked_add(phdr.p_memsz).ok_or(ElfError::BadPhdr)?;
 
         let page_vaddr = align_down(seg_vaddr, PAGE_SIZE as u64);
-        let page_end = align_up(seg_vaddr + phdr.p_memsz, PAGE_SIZE as u64);
-        let page_count = ((page_end - page_vaddr) / PAGE_SIZE as u64) as usize;
+        let page_end = align_up(seg_end, PAGE_SIZE as u64);
 
         let mut pte_flags = PTE_PRESENT | PTE_USER;
         if phdr.p_flags & PF_W != 0 {
@@ -217,49 +238,49 @@ pub fn load_elf(
             vma_flags |= VmaFlags::EXEC;
         }
 
-        let mut page_offset = 0u64;
-        while page_offset < (page_end - page_vaddr) {
-            let frame_phys = alloc_zeroed_frame().ok_or(ElfError::AllocFailed)?;
-
-            let vaddr = page_vaddr + page_offset;
-            if !addr_space.map(vaddr, frame_phys, pte_flags) {
-                return Err(ElfError::MappingFailed);
+        let mut page = page_vaddr;
+        while page < page_end {
+            if addr_space.translate(page).is_none() {
+                let frame_phys = alloc_zeroed_frame().ok_or(ElfError::AllocFailed)?;
+                if !addr_space.map(page, frame_phys, pte_flags) {
+                    return Err(ElfError::MappingFailed);
+                }
             }
-
-            page_offset += PAGE_SIZE as u64;
+            page = page
+                .checked_add(PAGE_SIZE as u64)
+                .ok_or(ElfError::MappingFailed)?;
         }
 
         vm.add_vma(page_vaddr, page_end, vma_flags);
 
-        let file_offset = phdr.p_offset as usize;
-        let file_size = phdr.p_filesz as usize;
-
+        let file_size = usize::try_from(phdr.p_filesz).map_err(|_| ElfError::OutOfBounds)?;
         if file_size > 0 {
-            if file_offset + file_size > data.len() {
+            let file_offset = usize::try_from(phdr.p_offset).map_err(|_| ElfError::OutOfBounds)?;
+            let end = file_offset
+                .checked_add(file_size)
+                .ok_or(ElfError::OutOfBounds)?;
+            if end > data.len() {
                 return Err(ElfError::OutOfBounds);
             }
 
-            let page_inner_offset = (seg_vaddr - page_vaddr) as usize;
-
-            let src = &data[file_offset..file_offset + file_size];
-            let mut bytes_copied = 0usize;
-
-            while bytes_copied < file_size {
-                let vaddr = seg_vaddr + bytes_copied as u64;
+            let src = &data[file_offset..end];
+            let mut copied = 0usize;
+            while copied < src.len() {
+                let vaddr = seg_vaddr
+                    .checked_add(copied as u64)
+                    .ok_or(ElfError::MappingFailed)?;
                 let phys = addr_space.translate(vaddr).ok_or(ElfError::MappingFailed)?;
-
                 let page_remaining = PAGE_SIZE - (vaddr as usize % PAGE_SIZE);
-                let to_copy = (file_size - bytes_copied).min(page_remaining);
+                let to_copy = (src.len() - copied).min(page_remaining);
 
-                let dst_ptr = phys_to_virt(phys) as *mut u8;
                 unsafe {
                     core::ptr::copy_nonoverlapping(
-                        src.as_ptr().add(bytes_copied),
-                        dst_ptr,
+                        src.as_ptr().add(copied),
+                        phys_to_virt(phys) as *mut u8,
                         to_copy,
                     );
                 }
-                bytes_copied += to_copy;
+                copied += to_copy;
             }
         }
 
@@ -272,19 +293,38 @@ pub fn load_elf(
         );
     }
 
-    let brk = align_up(load_max + slide, PAGE_SIZE as u64);
-    vm.brk = brk;
-
-    if phdr_vaddr == 0 && phoff != 0 {
+    if phdr_vaddr == 0 && ehdr.e_phoff != 0 {
+        let ph_bytes = (ehdr.e_phnum as u64)
+            .checked_mul(ehdr.e_phentsize as u64)
+            .ok_or(ElfError::BadPhdr)?;
         for phdr in phdrs {
-            if phdr.p_type == PT_LOAD && phdr.p_offset == 0 {
-                phdr_vaddr = phdr.p_vaddr + slide + ehdr.e_phoff;
+            if phdr.p_type != PT_LOAD || phdr.p_filesz == 0 {
+                continue;
+            }
+            let seg_file_start = phdr.p_offset;
+            let seg_file_end = phdr
+                .p_offset
+                .checked_add(phdr.p_filesz)
+                .ok_or(ElfError::BadPhdr)?;
+            let ph_file_end = ehdr.e_phoff.checked_add(ph_bytes).ok_or(ElfError::BadPhdr)?;
+            if ehdr.e_phoff >= seg_file_start && ph_file_end <= seg_file_end {
+                let delta = ehdr.e_phoff - seg_file_start;
+                phdr_vaddr = phdr
+                    .p_vaddr
+                    .checked_add(slide)
+                    .and_then(|v| v.checked_add(delta))
+                    .ok_or(ElfError::BadPhdr)?;
                 break;
             }
         }
     }
 
-    let entry = ehdr.e_entry + slide;
+    let entry = ehdr.e_entry.checked_add(slide).ok_or(ElfError::BadPhdr)?;
+    let brk = align_up(
+        load_max.checked_add(slide).ok_or(ElfError::BadPhdr)?,
+        PAGE_SIZE as u64,
+    );
+    vm.brk = brk;
 
     log::debug!(
         "ELF loaded: entry={:#018x} brk={:#018x} pie={} interp={}",
@@ -313,10 +353,14 @@ pub fn is_valid_elf(data: &[u8]) -> bool {
     &ehdr.e_ident[0..4] == &ELFMAG
         && ehdr.e_ident[4] == ELFCLASS64
         && ehdr.e_ident[5] == ELFDATA2LSB
+        && (ehdr.e_type == ET_EXEC || ehdr.e_type == ET_DYN)
         && ehdr.e_machine == EM_X86_64
 }
 
 pub fn read_cstr(data: &[u8], offset: usize) -> &[u8] {
+    if offset >= data.len() {
+        return &[];
+    }
     let slice = &data[offset..];
     let end = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
     &slice[..end]
