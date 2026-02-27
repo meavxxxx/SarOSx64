@@ -36,7 +36,12 @@ pub fn init_bsp(kernel_stack_top: u64) {
         let mut cr4 = read_cr4();
         cr4 |= CR4_PGE;
         if has_smep    { cr4 |= CR4_SMEP; }
-        if has_smap    { cr4 |= CR4_SMAP; }
+        // SMAP requires explicit STAC/CLAC around every user-memory access.
+        // Current syscall/usercopy paths dereference user pointers directly,
+        // so keep SMAP disabled until proper uaccess helpers are in place.
+        if has_smap {
+            log::warn!("SMAP supported but disabled (uaccess not implemented)");
+        }
         if has_fsgsbase { cr4 |= CR4_FSGSBASE; }
         write_cr4(cr4);
 
@@ -49,7 +54,7 @@ pub fn init_bsp(kernel_stack_top: u64) {
         }
     }
 
-    log::debug!("CPU features: WP enabled; SMEP/SMAP/FSGSBASE/NXE if supported");
+    log::debug!("CPU features: WP enabled; SMEP/FSGSBASE/NXE if supported (SMAP disabled)");
 }
 
 pub fn udelay(us: u64) {
